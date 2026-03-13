@@ -27,3 +27,4 @@ email-validator
 sqlalchemy
 sqlalchemy
 psycopg2-binary
+ddgs
