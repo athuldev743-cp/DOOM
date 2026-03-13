@@ -4,7 +4,7 @@ credentials.json
 __pycache__/
 *.pyc
 *.pyo
-agent/
+
 *.mp3
 src/api/static/tts_cache/
 data/chroma/
