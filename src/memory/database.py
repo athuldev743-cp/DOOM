@@ -8,13 +8,16 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is not set")
+
 engine = create_engine(
     DATABASE_URL,
     poolclass=QueuePool,
     pool_size=5,
     max_overflow=10,
-    pool_pre_ping=True,      # Test connection before using it
-    pool_recycle=300,        # Recycle connections every 5 minutes
+    pool_pre_ping=True,
+    pool_recycle=300,
     connect_args={
         "sslmode": "require",
         "connect_timeout": 10,
