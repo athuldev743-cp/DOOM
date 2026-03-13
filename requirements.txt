@@ -1,6 +1,6 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-python-dotenv==1.2.2
+fastapi
+uvicorn
+python-dotenv
 groq
 openai
 google-generativeai
@@ -10,7 +10,7 @@ beautifulsoup4
 psycopg
 psycopg-binary
 python-multipart
-pydantic==1.10.12
+pydantic
 APScheduler
 duckduckgo-search
 google-api-python-client
