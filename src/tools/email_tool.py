@@ -1,4 +1,6 @@
 import os
+import json
+import tempfile
 import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -13,46 +15,49 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
 def get_gmail_service():
     creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open('token.json', 'w') as f:
-                f.write(creds.to_json())
-    return build('gmail', 'v1', credentials=creds)
 
-
-class ReadEmailsTool(BaseTool):
-    name = "read_emails"
-    description = "Read latest unread emails from Gmail"
-
-    def run(self, count: int = 5) -> str:
+    # Try env variable first (Railway)
+    token_json = os.getenv("GMAIL_TOKEN_JSON")
+    if token_json:
         try:
-            service = get_gmail_service()
-            results = service.users().messages().list(
-                userId='me', labelIds=['UNREAD'], maxResults=count
-            ).execute()
-            messages = results.get('messages', [])
-            if not messages:
-                return "No unread emails."
-            emails = []
-            for msg in messages[:count]:
-                m = service.users().messages().get(
-                    userId='me', id=msg['id'], format='metadata',
-                    metadataHeaders=['From', 'Subject', 'Date']
-                ).execute()
-                headers = {h['name']: h['value'] for h in m['payload']['headers']}
-                snippet = m.get('snippet', '')[:150]
-                emails.append(
-                    f"From: {headers.get('From', 'Unknown')}\n"
-                    f"Subject: {headers.get('Subject', 'No subject')}\n"
-                    f"Preview: {snippet}"
-                )
-            return f"You have {len(messages)} unread emails:\n\n" + "\n\n---\n\n".join(emails)
+            token_data = json.loads(token_json)
+            tmp = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.json', delete=False
+            )
+            json.dump(token_data, tmp)
+            tmp.close()
+            creds = Credentials.from_authorized_user_file(tmp.name, SCOPES)
         except Exception as e:
-            return f"Email error: {str(e)}"
+            print(f"[Gmail] Env token error: {e}")
 
+    # Fall back to file (local)
+    if not creds and os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+
+    if not creds:
+        raise Exception(
+            "Gmail credentials not found. "
+            "Set GMAIL_TOKEN_JSON env variable on Railway."
+        )
+
+    if not creds.valid:
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            # Save refreshed token back to env-loaded temp file
+            if token_json:
+                try:
+                    tmp2 = tempfile.NamedTemporaryFile(
+                        mode='w', suffix='.json', delete=False
+                    )
+                    tmp2.write(creds.to_json())
+                    tmp2.close()
+                except:
+                    pass
+            else:
+                with open('token.json', 'w') as f:
+                    f.write(creds.to_json())
+
+    return build('gmail', 'v1', credentials=creds)
 
 class SendEmailTool(BaseTool):
     name = "send_email"
