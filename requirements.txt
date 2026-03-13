@@ -24,3 +24,4 @@ bcrypt
 pyparsing
 dnspython
 email-validator
+sqlalchemy
