@@ -28,3 +28,4 @@ sqlalchemy
 sqlalchemy
 psycopg2-binary
 ddgs
+edge-tts
