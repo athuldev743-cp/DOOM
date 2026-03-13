@@ -16,12 +16,12 @@ GEMINI_MODELS = [
 ]
 
 # Primary — Groq (fast, free)
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY") or "dummy")
 
 # Fallback — OpenRouter
 openrouter_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
+    api_key=os.getenv("OPENROUTER_API_KEY") or "dummy"
 )
 
 GROQ_MODELS = [
