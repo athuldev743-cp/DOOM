@@ -16,44 +16,43 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 def get_gmail_service():
     creds = None
 
-    # Try env variable first (Railway)
+    # Load credentials.json from env (Railway)
+    creds_json = os.getenv("GMAIL_CREDENTIALS_JSON")
+    if creds_json:
+        try:
+            tmp_creds = tempfile.NamedTemporaryFile(
+                mode='w', suffix='.json', delete=False
+            )
+            tmp_creds.write(creds_json)
+            tmp_creds.close()
+            os.environ['GOOGLE_CREDENTIALS_FILE'] = tmp_creds.name
+        except Exception as e:
+            print(f"[Gmail] Credentials env error: {e}")
+
+    # Load token from env (Railway)
     token_json = os.getenv("GMAIL_TOKEN_JSON")
     if token_json:
         try:
-            token_data = json.loads(token_json)
-            tmp = tempfile.NamedTemporaryFile(
+            tmp_token = tempfile.NamedTemporaryFile(
                 mode='w', suffix='.json', delete=False
             )
-            json.dump(token_data, tmp)
-            tmp.close()
-            creds = Credentials.from_authorized_user_file(tmp.name, SCOPES)
+            tmp_token.write(token_json)
+            tmp_token.close()
+            creds = Credentials.from_authorized_user_file(tmp_token.name, SCOPES)
         except Exception as e:
-            print(f"[Gmail] Env token error: {e}")
+            print(f"[Gmail] Token env error: {e}")
 
-    # Fall back to file (local)
+    # Fall back to local files
     if not creds and os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
 
     if not creds:
-        raise Exception(
-            "Gmail credentials not found. "
-            "Set GMAIL_TOKEN_JSON env variable on Railway."
-        )
+        raise Exception("Gmail credentials not found. Set GMAIL_TOKEN_JSON on Railway.")
 
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            # Save refreshed token back to env-loaded temp file
-            if token_json:
-                try:
-                    tmp2 = tempfile.NamedTemporaryFile(
-                        mode='w', suffix='.json', delete=False
-                    )
-                    tmp2.write(creds.to_json())
-                    tmp2.close()
-                except:
-                    pass
-            else:
+            if not token_json:
                 with open('token.json', 'w') as f:
                     f.write(creds.to_json())
 
