@@ -58,6 +58,36 @@ def get_gmail_service():
 
     return build('gmail', 'v1', credentials=creds)
 
+class ReadEmailsTool(BaseTool):
+    name = "read_emails"
+    description = "Read latest unread emails from Gmail"
+
+    def run(self, count: int = 5) -> str:
+        try:
+            service = get_gmail_service()
+            results = service.users().messages().list(
+                userId='me', labelIds=['UNREAD'], maxResults=count
+            ).execute()
+            messages = results.get('messages', [])
+            if not messages:
+                return "No unread emails."
+            emails = []
+            for msg in messages[:count]:
+                m = service.users().messages().get(
+                    userId='me', id=msg['id'], format='metadata',
+                    metadataHeaders=['From', 'Subject', 'Date']
+                ).execute()
+                headers = {h['name']: h['value'] for h in m['payload']['headers']}
+                snippet = m.get('snippet', '')[:150]
+                emails.append(
+                    f"From: {headers.get('From', 'Unknown')}\n"
+                    f"Subject: {headers.get('Subject', 'No subject')}\n"
+                    f"Preview: {snippet}"
+                )
+            return f"You have {len(messages)} unread emails:\n\n" + "\n\n---\n\n".join(emails)
+        except Exception as e:
+            return f"Email error: {str(e)}"
+
 class SendEmailTool(BaseTool):
     name = "send_email"
     description = "Send an email via Gmail"
