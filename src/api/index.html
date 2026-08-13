@@ -248,14 +248,152 @@
 
     /* ── INPUT AREA ── */
     .input-area {
-      padding: 12px 16px;
-      padding-bottom: max(12px, env(safe-area-inset-bottom));
-      border-top: 1px solid var(--border);
-      background: var(--bg);
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 20px max(16px, env(safe-area-inset-bottom));
+      border-top: 1px solid transparent;
+      background: linear-gradient(to top, var(--bg) 70%, transparent);
       display: flex;
-      gap: 8px;
-      align-items: center;
+      justify-content: center;
+      align-items: flex-end;
       flex-shrink: 0;
+    }
+
+    /* Modern LLM-style composer */
+    .composer {
+      width: min(100%, 900px);
+      min-width: 0;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 9px 10px 9px 16px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 26px;
+      box-shadow: 0 4px 20px #00000030;
+      transition: border-color .2s, box-shadow .2s, border-radius .2s;
+    }
+
+    .composer:focus-within {
+      border-color: var(--red-border);
+      box-shadow: 0 4px 24px #00000045;
+    }
+
+    .composer #input {
+      flex: 1;
+      min-width: 0;
+      min-height: 26px;
+      max-height: 190px;
+      height: 28px;
+      padding: 4px 2px;
+      margin: 0;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      color: var(--text);
+      font-size: 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      outline: none;
+      resize: none;
+      overflow-y: hidden;
+      line-height: 1.5;
+      transition: height .12s ease;
+    }
+
+    .composer #input:focus {
+      border: none;
+    }
+
+    .composer #input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .composer .mic-btn,
+    .composer .send-btn {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .composer .mic-btn {
+      border: none;
+      background: transparent;
+      color: var(--text-mid);
+      font-size: 16px;
+    }
+
+    .composer .mic-btn:hover {
+      background: var(--bg2);
+      color: var(--text);
+    }
+
+    .composer .send-btn {
+      font-size: 14px;
+    }
+
+    .composer .send-btn:disabled {
+      opacity: .45;
+    }
+
+    /* Batch answer: one clean result card containing every requested company. */
+    .batch-results {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      width: 100%;
+    }
+
+    .batch-result {
+      padding: 16px 0 18px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .batch-result:first-child {
+      padding-top: 2px;
+    }
+
+    .batch-result:last-child {
+      border-bottom: 0;
+      padding-bottom: 2px;
+    }
+
+    .batch-company {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .batch-finding {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      color: var(--text-dim);
+      margin-bottom: 9px;
+      font-family: 'DM Mono', monospace;
+    }
+
+    .batch-content {
+      line-height: 1.65;
+    }
+
+    @media (max-width: 600px) {
+      .input-area {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
+      .composer {
+        width: 100%;
+        border-radius: 22px;
+      }
+
+      .composer #input {
+        max-height: 150px;
+      }
     }
 
     .mic-btn {
@@ -288,15 +426,19 @@
 
     #input {
       flex: 1;
-      height: 42px;
+      min-height: 42px;
+      max-height: 120px;
       background: var(--bg3);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 0 16px;
+      padding: 10px 16px;
       color: var(--text);
       font-size: 14px;
       font-family: 'Space Grotesk', sans-serif;
       outline: none;
+      resize: none;
+      overflow-y: auto;
+      line-height: 1.4;
       transition: border-color 0.2s;
     }
 
@@ -425,6 +567,225 @@
       border-color: var(--red-border);
       color: var(--red);
     }
+
+    /* ── JOB CARD & MODAL STYLES ── */
+    .job-cards-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
+    .job-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      transition: border-color 0.15s;
+    }
+
+    .job-card:hover {
+      border-color: var(--red-border);
+    }
+
+    .job-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .job-card-company {
+      font-size: 12px;
+      color: var(--red);
+      font-family: 'DM Mono', monospace;
+      margin-bottom: 8px;
+    }
+
+    .job-card-snippet {
+      font-size: 12px;
+      color: var(--text-mid);
+      line-height: 1.4;
+      margin-bottom: 10px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .job-card-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-view {
+      flex: 1;
+      padding: 6px 12px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    .btn-apply {
+      padding: 6px 14px;
+      background: var(--red);
+      border: none;
+      border-radius: 6px;
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: 'Space Grotesk', sans-serif;
+    }
+
+    /* ── JOB DETAIL MODAL ── */
+    .job-modal-panel {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000000dd;
+      z-index: 120;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .job-modal-panel.open {
+      display: flex;
+    }
+
+    .job-modal-sheet {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 440px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: slideUp 0.2s ease;
+    }
+
+    .job-modal-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+
+    .job-modal-header h2 {
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    .job-modal-header p {
+      font-size: 12px;
+      color: var(--red);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .job-modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    .job-modal-body {
+      padding: 16px;
+      overflow-y: auto;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+      white-space: pre-wrap;
+      flex: 1;
+    }
+
+    .job-modal-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* ── STATS BAR (success rate, top-left, outside chat) ── */
+.stats-bar {
+  padding: 6px 18px 0;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+
+.success-rate-badge {
+  display: inline-block;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-mid);
+  font-family: 'DM Mono', monospace;
+}
+
+/* ── APPLY-ALL PROGRESS TAB ── */
+.apply-progress-panel {
+  display: none;
+  position: fixed;
+  top: 66px;
+  left: 12px;
+  right: 12px;
+  max-width: 456px;
+  margin: 0 auto;
+  z-index: 130;
+  background: var(--bg2);
+  border: 1px solid var(--red-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 24px #000000aa;
+}
+
+.apply-progress-panel.open { display: block; }
+
+.apply-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.apply-progress-company {
+  font-size: 13px;
+  color: var(--red);
+  font-family: 'DM Mono', monospace;
+  margin-bottom: 8px;
+  min-height: 16px;
+}
+
+.apply-progress-track {
+  height: 6px;
+  background: var(--bg3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.apply-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--red);
+  transition: width 0.2s ease;
+}
+
   </style>
 </head>
 <body>
@@ -450,6 +811,13 @@
     </div>
   </div>
 
+
+  <!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="success-rate-badge" id="success-rate-badge">📊 --</div>
+</div>
+
+
   <!-- UPLOAD BAR -->
   <div class="upload-bar">
     <label class="upload-label">
@@ -471,13 +839,14 @@
 
   <!-- INPUT -->
   <div class="input-area">
-    <button class="mic-btn" id="mic">🎤</button>
-    <input id="input" type="text" placeholder="Message DOOM..." autocomplete="off" />
-    <button class="send-btn" id="send">➤</button>
+    <div class="composer">
+      <textarea id="input" placeholder="Message DOOM..." rows="1"></textarea>
+      <button class="mic-btn" id="mic" aria-label="Voice input">🎤</button>
+      <button class="send-btn" id="send" aria-label="Send message">➤</button>
+    </div>
   </div>
 
 </div>
-
 
 <!-- MEMORY PANEL -->
 <div class="memory-panel" id="memory-panel" onclick="closeMemory(event)">
@@ -488,8 +857,39 @@
   </div>
 </div>
 
+<!-- JOB DETAIL MODAL -->
+<div class="job-modal-panel" id="job-modal" onclick="closeJobModal(event)">
+  <div class="job-modal-sheet">
+    <div class="job-modal-header">
+      <div>
+        <h2 id="modal-job-title">Job Title</h2>
+        <p id="modal-job-company">Company</p>
+      </div>
+      <button class="job-modal-close" onclick="forceCloseJobModal()">✕</button>
+    </div>
+    <div class="job-modal-body" id="modal-job-desc">
+      Full job description will appear here...
+    </div>
+    <div class="job-modal-footer">
+      <a id="modal-job-url" href="#" target="_blank" style="font-size: 12px; color: var(--text-dim); text-decoration: underline;">View Original Link</a>
+      <button class="btn-apply" id="modal-apply-btn">Apply Now 🚀</button>
+    </div>
+  </div>
+</div>
+
+<div class="apply-progress-panel" id="apply-progress-panel">
+  <div class="apply-progress-header">
+    <span id="apply-progress-label">Applying 0/0</span>
+    <button class="job-modal-close" onclick="cancelApplyAll()">✕</button>
+  </div>
+  <div class="apply-progress-company" id="apply-progress-company">—</div>
+  <div class="apply-progress-track">
+    <div class="apply-progress-fill" id="apply-progress-fill"></div>
+  </div>
+</div>
+
 <script>
- const messagesEl = document.getElementById('messages');
+const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const micBtn = document.getElementById('mic');
@@ -534,7 +934,6 @@ function processQueue() {
 function speak(text) {
   if (!window._speakOutput || !text || !text.trim()) return;
   
-  // Split into sentences — play first one immediately, queue rest
   const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
   
   sentences.forEach((sentence, i) => {
@@ -582,30 +981,38 @@ function addMessage(role, html) {
 }
 
 function handleSpecialResponse(response) {
+  if (response.includes('JOBS_DATA:')) {
+    try {
+      const rawJson = response.replace('JOBS_DATA:', '').trim();
+      const jobs = JSON.parse(rawJson);
+      return renderJobCards(jobs);
+    } catch (e) {
+      console.error('Failed to parse jobs payload', e);
+    }
+  }
+
+  if (response.includes('APPLY_REPORT:')) {
+    return response.replace('APPLY_REPORT:', '').replace(/\n/g, '<br/>');
+  }
 
   if (response.includes('CALL:')) {
     const match = response.match(/CALL:(\+?\d+):(.+)/);
-
     if (match) {
       if (confirm(`📞 Call ${match[2]}?`)) {
         window.location.href = `tel:${match[1]}`;
       }
-
       return `📞 Calling ${match[2]}...`;
     }
   }
 
   if (response.includes('WHATSAPP:')) {
     const match = response.match(/WHATSAPP:(\d+):([\s\S]*)/);
-
     if (match) {
       const number = match[1];
       const message = match[2] || '';
-
       const waApp = `whatsapp://send?phone=${number}&text=${encodeURIComponent(message)}`;
       const waWeb = `https://wa.me/${number}?text=${encodeURIComponent(message)}`;
 
-      // Try native WhatsApp app first
       const link = document.createElement('a');
       link.href = waApp;
       link.style.display = 'none';
@@ -613,7 +1020,6 @@ function handleSpecialResponse(response) {
       link.click();
       document.body.removeChild(link);
 
-      // Fallback to web after 1.5s
       setTimeout(() => {
         window.open(waWeb, '_blank');
       }, 1500);
@@ -625,14 +1031,12 @@ function handleSpecialResponse(response) {
   if (response.includes('WA_NOT_FOUND:')) {
     const match = response.match(/WA_NOT_FOUND:(.+)/);
     const name = match ? match[1] : 'contact';
-
     return `❌ Contact "${name}" not found. Try: "add contact ${name} +91XXXXXXXXXX"`;
   }
 
   if (response.includes('CALL_NOT_FOUND:')) {
     const match = response.match(/CALL_NOT_FOUND:(.+)/);
     const name = match ? match[1] : 'contact';
-
     return `❌ Contact "${name}" not found. Try: "add contact ${name} +91XXXXXXXXXX"`;
   }
 
@@ -644,16 +1048,172 @@ function handleSpecialResponse(response) {
   return response;
 }
 
-async function sendMessage(text) {
-  text = text || inputEl.value.trim();
-  if (!text) return;
 
-  // Stop any current audio immediately
+// Multi-command batch handling.
+// A multi-line message is treated as ONE user submission. Each line is
+// processed independently, but the UI waits until ALL results are ready
+// and then renders one modern grouped answer.
+async function sendMessage(text) {
+  text = text || inputEl.value;
+  if (!text || !text.trim()) return;
+
+  inputEl.value = '';
+  inputEl.style.height = '28px';
+  inputEl.scrollTop = 0;
+
+  const commands = text
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  if (!commands.length) return;
+
+  // Normal single-command behavior stays unchanged.
+  if (commands.length === 1) {
+    await sendSingleMessage(commands[0]);
+    return;
+  }
+
+  await sendBatchAsOneAnswer(commands);
+}
+
+async function sendBatchAsOneAnswer(commands) {
+  audioQueue = [];
+  isPlaying = false;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
+
+  sendBtn.disabled = true;
+  setStatus('thinking');
+
+  // Show the complete user submission as one message, like modern LLMs.
+  addMessage('user', commands.map(escapeHtml).join('<br>'));
+
+  const resultBubble = addMessage(
+    'doom',
+    '<div class="thinking-dots"><span></span><span></span><span></span></div>'
+  );
+
+  try {
+    const results = [];
+
+    // Process through the SAME /chat-stream endpoint and response format
+    // used by the existing single-message function. We intentionally wait
+    // for each request here because the backend may use shared session/tool
+    // state. The user sees nothing until all requested companies finish.
+    for (const command of commands) {
+      const result = await collectChatResult(command);
+      results.push({ command, result });
+    }
+
+    resultBubble.innerHTML = renderBatchResults(results);
+
+  } catch (e) {
+    console.error('Batch processing error:', e);
+    resultBubble.innerHTML =
+      '❌ Could not complete the batch request.<br>' +
+      '<span style="color:var(--text-dim)">Please try again.</span>';
+  }
+
+  sendBtn.disabled = false;
+  setStatus('online');
+  inputEl.focus();
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function collectChatResult(text) {
+  const res = await fetch('/chat-stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: text })
+  });
+
+  if (!res.ok || !res.body) {
+    throw new Error(`HTTP ${res.status || 'stream unavailable'}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResponse = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+
+    for (const evt of events) {
+      const line = evt.trim();
+      if (!line.startsWith('data: ')) continue;
+
+      try {
+        const data = JSON.parse(line.slice(6));
+
+        if (data.type === 'text') {
+          finalResponse = data.content || finalResponse;
+        }
+
+        if (data.type === 'audio' && window._speakOutput) {
+          const audio = new Audio(data.url + '?t=' + Date.now());
+          audioQueue.push(audio);
+          if (!isPlaying) processQueue();
+        }
+      } catch (e) {
+        console.error('SSE parse error:', e, line.slice(0, 200));
+      }
+    }
+  }
+
+  // Handle a final SSE event that did not end with \n\n.
+  if (buffer.trim().startsWith('data: ')) {
+    try {
+      const data = JSON.parse(buffer.trim().slice(6));
+      if (data.type === 'text') finalResponse = data.content || finalResponse;
+    } catch (_) {}
+  }
+
+  return finalResponse || 'No result returned.';
+}
+
+function renderBatchResults(results) {
+  return `<div class="batch-results">${results.map(({ command, result }) => {
+    const company = extractCompanyName(command);
+    const display = handleSpecialResponse(result);
+
+    return `
+      <section class="batch-result">
+        <div class="batch-company">${escapeHtml(company)}</div>
+        <div class="batch-finding">Finding HR email</div>
+        <div class="batch-content">${display}</div>
+      </section>
+    `;
+  }).join('')}</div>`;
+}
+
+function extractCompanyName(command) {
+  const match = command.match(/^find\s+(?:the\s+)?(?:hr|human\s+resources)\s+email\s+for\s+(.+)$/i);
+  if (match) return match[1].trim();
+
+  const forMatch = command.match(/\bfor\s+(.+)$/i);
+  return forMatch ? forMatch[1].trim() : command;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}
+
+async function sendSingleMessage(text) {
   audioQueue = [];
   isPlaying = false;
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
 
-  inputEl.value = '';
   sendBtn.disabled = true;
   setStatus('thinking');
 
@@ -669,34 +1229,35 @@ async function sendMessage(text) {
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
 
-      for (const line of lines) {
+      for (const evt of events) {
+        const line = evt.trim();
         if (!line.startsWith('data: ')) continue;
         try {
           const data = JSON.parse(line.slice(6));
-
           if (data.type === 'text') {
             const display = handleSpecialResponse(data.content);
             thinking.innerHTML = display;
           }
-
           if (data.type === 'audio' && window._speakOutput) {
             const audio = new Audio(data.url + '?t=' + Date.now());
             audioQueue.push(audio);
             if (!isPlaying) processQueue();
           }
-
-        } catch(e) {}
+        } catch (e) {
+          console.error('SSE parse error:', e, line.slice(0, 200));
+        }
       }
     }
-
   } catch (e) {
     thinking.innerHTML = 'Connection error. Is server running?';
   }
@@ -706,9 +1267,25 @@ async function sendMessage(text) {
   inputEl.focus();
 }
 
+function autoResizeInput() {
+  inputEl.style.height = 'auto';
+  const maxHeight = parseFloat(getComputedStyle(inputEl).maxHeight) || 180;
+  const nextHeight = Math.min(inputEl.scrollHeight, maxHeight);
+  inputEl.style.height = `${Math.max(26, nextHeight)}px`;
+  inputEl.style.overflowY = inputEl.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
+inputEl.addEventListener('input', autoResizeInput);
+
 sendBtn.onclick = () => sendMessage();
+
 inputEl.onkeydown = e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  // Enter sends the current composer content.
+  // Shift+Enter creates a new line, which can contain another command.
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
 };
 
 document.addEventListener('click', function unlock() {
@@ -716,7 +1293,6 @@ document.addEventListener('click', function unlock() {
   document.removeEventListener('click', unlock);
 }, { once: true });
 
-// Voice input
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const recognition = new SR();
@@ -726,19 +1302,18 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   let isListening = false;
 
   micBtn.onclick = () => {
-  // Stop audio when mic pressed
-  audioQueue = [];
-  isPlaying = false;
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  
-  if (isListening) { recognition.stop(); return; }
-  isListening = true;
-  micBtn.classList.add('listening');
-  micBtn.textContent = '⏹';
-  voiceBanner.classList.add('active');
-  inputEl.placeholder = 'Listening...';
-  recognition.start();
-};
+    audioQueue = [];
+    isPlaying = false;
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+    
+    if (isListening) { recognition.stop(); return; }
+    isListening = true;
+    micBtn.classList.add('listening');
+    micBtn.textContent = '⏹';
+    voiceBanner.classList.add('active');
+    inputEl.placeholder = 'Listening...';
+    recognition.start();
+  };
 
   recognition.onresult = e => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
@@ -756,6 +1331,7 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
     voiceBanner.classList.remove('active');
     inputEl.placeholder = 'Message DOOM...';
     inputEl.value = '';
+    autoResizeInput();
   }
 } else { micBtn.style.display = 'none'; }
 
@@ -813,7 +1389,6 @@ if ('serviceWorker' in navigator) {
 }
 
 async function getBriefing() {
-  // Show loading immediately
   const btn = document.querySelector('[title="Daily Briefing"]');
   if (btn) { btn.textContent = '⏳'; btn.style.pointerEvents = 'none'; }
   
@@ -833,7 +1408,309 @@ async function getBriefing() {
 
   if (btn) { btn.textContent = '☀️'; btn.style.pointerEvents = 'auto'; }
 }
-</script>
 
+// Global state for retrieved job dataset
+// Global state for retrieved job dataset
+window._loadedJobs = [];
+
+function renderJobCards(payload) {
+  const jobs = payload.jobs || payload; // supports old bare-array shape too, just in case
+  const platformCounts = payload.platform_counts || {};
+  window._loadedJobs = jobs;
+
+  const countsLine = Object.entries(platformCounts)
+    .map(([plat, count]) => `${plat}: ${count}`)
+    .join(' &nbsp;|&nbsp; ');
+
+  let html = `
+    <div class="job-cards-toolbar" style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+        <span style="font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace;">${jobs.length} jobs found</span>
+        <button class="btn-apply" id="apply-all-btn" onclick="applyToAll()">Apply All 🚀</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-mid);font-family:'DM Mono',monospace;">${countsLine}</div>
+    </div>
+    <div class="job-cards-container">
+  `;
+
+  jobs.forEach((job, idx) => {
+    html += `
+      <div class="job-card" id="job-card-${idx}">
+        <div class="job-card-title">${job.title}</div>
+        <div class="job-card-company">${job.company}</div>
+        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${job.platform}</span></div>
+        <div class="job-card-snippet">${job.snippet || (job.description ? job.description.substring(0, 100) : '')}...</div>
+        <div class="job-card-actions">
+          <button class="btn-view" onclick="openJobModal(${idx})">📋 View Details</button>
+          <button class="btn-apply" onclick="applySingleJob(${idx})">Apply 🚀</button>
+        </div>
+      </div>
+    `;
+  });
+
+  html += '</div>';
+  return html;
+}
+
+
+
+function removeJobCard(index) {
+  const card = document.getElementById(`job-card-${index}`);
+  if (card) {
+    card.style.transition = 'opacity 0.3s ease';
+    card.style.opacity = '0';
+    setTimeout(() => card.remove(), 300);
+  }
+}
+
+async function applySingleJob(index) {
+  const job = window._loadedJobs[index];
+  if (!job) return;
+
+  const btn = document.querySelector(`#job-card-${index} .btn-apply`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
+
+  try {
+    const res = await fetch('/api/apply-single-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index })
+    });
+    const data = await res.json();
+
+    if (data.apply_url) {
+      window.open(data.apply_url, '_blank'); // manual platforms — open the real listing
+    }
+
+    if (data.success) {
+      removeJobCard(index);
+      updateSuccessRate();
+    } else if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Apply 🚀';
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply 🚀'; }
+  }
+}
+
+async function sendEmailForJob(index) {
+  const btn = document.getElementById('modal-email-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+
+  try {
+    const res = await fetch('/api/send-email-job', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index })
+    });
+    const data = await res.json();
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = data.success ? '✅ Email Sent' : '📧 Send Email (retry)';
+    }
+    // No removeJobCard, no forceCloseJobModal — card stays, user can still Apply separately
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '📧 Send Email'; }
+  }
+}
+
+function openJobModal(index) {
+  const job = window._loadedJobs[index];
+  if (!job) return;
+
+  document.getElementById('modal-job-title').textContent = job.title;
+  document.getElementById('modal-job-company').textContent = job.company;
+  document.getElementById('modal-job-desc').textContent = job.description || job.snippet;
+  document.getElementById('modal-job-url').href = job.url || '#';
+
+  const applyBtn = document.getElementById('modal-apply-btn');
+  applyBtn.disabled = false;
+  applyBtn.textContent = 'Apply Now 🚀';
+  applyBtn.onclick = () => {
+    forceCloseJobModal();
+    applySingleJob(index);
+  };
+
+  // Add/update the Send Email button — for after manually applying on the platform
+  let emailBtn = document.getElementById('modal-email-btn');
+  if (!emailBtn) {
+    emailBtn = document.createElement('button');
+    emailBtn.id = 'modal-email-btn';
+    emailBtn.className = 'btn-view';
+    emailBtn.style.marginRight = '8px';
+    document.querySelector('.job-modal-footer').prepend(emailBtn);
+  }
+  emailBtn.disabled = false;
+  emailBtn.textContent = '📧 Send Email';
+  emailBtn.onclick = () => sendEmailForJob(index);
+
+  document.getElementById('job-modal').classList.add('open');
+}
+
+function closeJobModal(e) {
+  if (e.target === document.getElementById('job-modal')) {
+    forceCloseJobModal();
+  }
+}
+
+function forceCloseJobModal() {
+  document.getElementById('job-modal').classList.remove('open');
+}
+
+function applyToJob(company, title, index) {
+  const prompt = `Auto-apply for Job #${index} (${title} at ${company})`;
+  sendMessage(prompt);
+}
+
+
+window._applyAllCancelled = false;
+
+async function updateSuccessRate() {
+  try {
+    const res = await fetch('/api/stats/success-rate');
+    const data = await res.json();
+    const badge = document.getElementById('success-rate-badge');
+    badge.textContent = data.total === 0
+      ? '📊 No applications yet'
+      : `📊 ${data.rate}% success (${data.applied}/${data.total})`;
+  } catch (e) {
+    console.log('Success rate fetch failed:', e);
+  }
+}
+
+function cancelApplyAll() {
+  window._applyAllCancelled = true;
+  document.getElementById('apply-progress-panel').classList.remove('open');
+}
+async function applyToAll() {
+  if (window._applyAllRunning) return;
+  const jobs = window._loadedJobs;
+  if (!jobs.length) return;
+
+  if (!confirm(`Apply to all ${jobs.length} jobs (platform automation + email + direct links)?`)) return;
+
+  window._applyAllRunning = true;
+  window._applyAllCancelled = false;
+
+  const btn = document.getElementById('apply-all-btn');
+  if (btn) btn.disabled = true;
+
+  const panel = document.getElementById('apply-progress-panel');
+  const label = document.getElementById('apply-progress-label');
+  const companyEl = document.getElementById('apply-progress-company');
+  const fill = document.getElementById('apply-progress-fill');
+  if (panel) panel.classList.add('open');
+
+  let applied = 0, failed = 0;
+
+  for (let i = 0; i < jobs.length; i++) {
+    if (window._applyAllCancelled) break;
+    if (!document.getElementById(`job-card-${i}`)) continue; // already removed individually earlier
+
+    const job = jobs[i];
+    if (label) label.textContent = `Applying ${i + 1}/${jobs.length}`;
+    if (companyEl) companyEl.textContent = job.company || 'Hiring Company';
+    if (fill) fill.style.width = `${Math.round(((i + 1) / jobs.length) * 100)}%`;
+
+    try {
+      const res = await fetch('/api/apply-single-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: i })
+      });
+      const data = await res.json();
+
+      if (data.apply_url) window.open(data.apply_url, '_blank');
+
+      if (data.success) {
+        applied++;
+        removeJobCard(i);
+      } else {
+        failed++;
+      }
+    } catch (e) {
+      failed++;
+    }
+
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  if (label) {
+    label.textContent = window._applyAllCancelled
+      ? `Cancelled: ${applied} applied, ${failed} failed`
+      : `Done: ${applied} applied, ${failed} failed`;
+  }
+  if (companyEl) companyEl.textContent = '';
+  setTimeout(() => { if (panel) panel.classList.remove('open'); }, 2500);
+
+  if (btn) { btn.disabled = false; btn.textContent = 'Apply All 🚀'; }
+  window._applyAllRunning = false;
+  updateSuccessRate();
+}
+
+async function applyPlatformsOnly() {
+  if (window._applyAllRunning) return;
+  const jobs = window._loadedJobs;
+  const platformJobs = jobs
+    .map((job, idx) => ({ job, idx }))
+    .filter(({ job }) => job.auto_apply);
+
+  if (!platformJobs.length) {
+    alert('No platform-automatable jobs (Naukri/Wellfound) in this list.');
+    return;
+  }
+
+  if (!confirm(`Queue ${platformJobs.length} jobs for Naukri/Wellfound automation + email?`)) return;
+
+  window._applyAllRunning = true;
+  const btn = document.getElementById('apply-platforms-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Queuing...'; }
+
+  const panel = document.getElementById('apply-progress-panel');
+  const label = document.getElementById('apply-progress-label');
+  const companyEl = document.getElementById('apply-progress-company');
+  const fill = document.getElementById('apply-progress-fill');
+  if (panel) panel.classList.add('open');
+
+  let applied = 0, failed = 0;
+
+  for (let i = 0; i < platformJobs.length; i++) {
+    if (window._applyAllCancelled) break;
+    const { job, idx } = platformJobs[i];
+
+    if (label) label.textContent = `Queuing ${i + 1}/${platformJobs.length}`;
+    if (companyEl) companyEl.textContent = job.company || 'Hiring Company';
+    if (fill) fill.style.width = `${Math.round(((i + 1) / platformJobs.length) * 100)}%`;
+
+    try {
+      const res = await fetch('/api/apply-single-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: idx })
+      });
+      const data = await res.json();
+      if (data.success) {
+        applied++;
+        removeJobCard(idx);
+      } else {
+        failed++;
+      }
+    } catch (e) {
+      failed++;
+    }
+
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  if (label) label.textContent = `Done: ${applied} queued, ${failed} failed`;
+  if (companyEl) companyEl.textContent = '';
+  setTimeout(() => { if (panel) panel.classList.remove('open'); }, 2500);
+
+  if (btn) { btn.disabled = false; btn.textContent = '🤖 Platform Apply All'; }
+  window._applyAllRunning = false;
+  updateSuccessRate();
+}
+</script>
 </body>
 </html>

@@ -1,0 +1,31 @@
+name: Morning Digest & Apply
+on:
+  schedule:
+    - cron: "30 3 * * *"  # 9:00 AM IST = 3:30 AM UTC
+  workflow_dispatch: {}
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Gmail credentials
+        run: |
+          echo "${{ secrets.GMAIL_CREDENTIALS_B64 }}" | base64 -d > credentials.json
+          echo "${{ secrets.GMAIL_TOKEN_B64 }}" | base64 -d > token.json
+
+      - name: Run digest + apply
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python -m src.scripts.morning_digest

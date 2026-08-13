@@ -1,18 +1,20 @@
 import os
 import re
-from typing import List, Optional, Tuple
-
+import json
+import time
 import requests
+from typing import List, Tuple, Optional
 
 from src.tools.base import BaseTool
 from src.memory.profile import ProfileManager
+from src.tools.email_tool import get_gmail_service
+from src.tools.email_verifier import domain_has_mx
 
 
 EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
 
 
 def normalize_company_name(company: str) -> str:
-    """Normalize company string for rough domain guessing."""
     if not company:
         return ""
     cleaned = company.lower().strip()
@@ -22,13 +24,11 @@ def normalize_company_name(company: str) -> str:
 
 
 def guess_company_domain(company: str) -> str:
-    """Very rough domain guess. Not guaranteed to be correct."""
     base = normalize_company_name(company)
     return f"{base}.com" if base else ""
 
 
 def extract_emails(text: str) -> List[str]:
-    """Extract unique emails from text while preserving order."""
     if not text:
         return []
     found = re.findall(EMAIL_REGEX, text)
@@ -36,10 +36,8 @@ def extract_emails(text: str) -> List[str]:
 
 
 def extract_verified_emails_from_result(email_result: str) -> List[str]:
-    """Extract only emails from lines marked as verified."""
     if not email_result:
         return []
-
     verified_lines = [
         line for line in email_result.splitlines()
         if "✓ verified" in line.lower() or "verified" in line.lower()
@@ -47,332 +45,90 @@ def extract_verified_emails_from_result(email_result: str) -> List[str]:
     return extract_emails("\n".join(verified_lines))
 
 
-def get_resume_for_role(role: str) -> Tuple[str, str]:
+AI_ENGINEER_KEYWORDS = [
+    "machine learning", "ml", "deep learning", "llm", "nlp", "ai engineer",
+    "genai", "generative ai", "rag", "langchain", "transformer", "pytorch",
+    "tensorflow", "prompt engineering", "computer vision", "data science",
+    "embeddings", "vector database", "chroma",
+]
+
+BACKEND_AI_SYSTEMS_KEYWORDS = [
+    "backend", "api", "microservice", "system design", "infrastructure",
+    "fastapi", "django", "node", "database", "postgresql", "mongodb",
+    "docker", "kubernetes", "distributed systems", "scalability",
+    "devops", "backend engineer", "full stack",
+]
+
+RESUME_PROFILES = [
+    {
+        "label": "AI Engineer Resume",
+        "path": "data/resumes/AI_Engineer.pdf",
+        "keywords": AI_ENGINEER_KEYWORDS,
+    },
+    {
+        "label": "Backend & AI Systems Engineer Resume",
+        "path": "data/resumes/Backend___AI_Systems_Engineer.pdf",
+        "keywords": BACKEND_AI_SYSTEMS_KEYWORDS,
+    },
+]
+
+DEFAULT_RESUME_PROFILE = RESUME_PROFILES[0]  # used only if nothing else matches/exists
+
+
+def get_resume_for_role(role: str, jd_text: str = "") -> Tuple[str, str]:
     p = ProfileManager()
-    role_lower = (role or "").lower()
 
-    if any(word in role_lower for word in ["ai", "machine learning", "ml", "data", "llm", "nlp"]):
-        path = p.get("resume_ai") or "data/resumes/ai_resume.pdf"
-        label = "AI Engineer"
-    elif any(word in role_lower for word in ["fullstack", "full stack", "full-stack", "frontend", "react"]):
-        path = p.get("resume_fullstack") or "data/resumes/fullstack_resume.pdf"
-        label = "Full Stack"
-    else:
-        path = p.get("resume_backend") or "data/resumes/backend_resume.pdf"
-        label = "Backend"
+    # Explicit manual override always wins, if set and present
+    override_path = p.get("resume_path")
+    if override_path and os.path.exists(override_path):
+        return override_path, "Manual Override Resume"
 
-    return path, label
+    combined = f"{role or ''} {jd_text or ''}".lower()
+
+    best_profile, best_score = None, -1
+    for profile in RESUME_PROFILES:
+        if not os.path.exists(profile["path"]):
+            continue
+        score = sum(1 for kw in profile["keywords"] if kw in combined)
+        if score > best_score:
+            best_score, best_profile = score, profile
+
+    if best_profile and best_score > 0:
+        return best_profile["path"], best_profile["label"]
+
+    # No keyword signal — fall back to whichever profiled resume exists
+    for profile in RESUME_PROFILES:
+        if os.path.exists(profile["path"]):
+            return profile["path"], profile["label"]
+
+    # Nothing on disk at all
+    return DEFAULT_RESUME_PROFILE["path"], DEFAULT_RESUME_PROFILE["label"] + " (missing on disk)"
 
 
 class FindHREmailTool(BaseTool):
     name = "find_hr_email"
-    description = "Find HR or recruiter email for a company"
+    description = "Find HR or recruiter email for a company, falling back to a real published contact email (checked against the company's own domain) before ever guessing"
 
     HR_KEYWORDS = ["hr", "recruit", "career", "job", "talent", "hire", "people"]
+
+    CONTACT_PATH_CANDIDATES = ["/careers", "/jobs", "/contact", "/contact-us", "/about", ""]
+    PRIORITY_PREFIXES = ("careers", "jobs", "recruiting", "recruitment", "talent", "hr")
+    GENERIC_CONTACT_PREFIXES = ("contact", "info", "hello", "support", "admin", "office")
+    AVOID_PREFIXES = (
+        "sales", "billing", "accounts", "legal", "press", "media",
+        "noreply", "no-reply", "notifications", "notification",
+        "donotreply", "do-not-reply", "automated", "system", "bot",
+    )
+    # Third-party ATS/recruiting platform domains — an email here is the
+    # vendor's, not the company's, even if scraped off the company's own
+    # careers page (embedded widgets leak these constantly)
+    ATS_VENDOR_DOMAINS = (
+        "smartrecruiters.com", "greenhouse.io", "lever.co", "workday.com",
+        "myworkdayjobs.com", "bamboohr.com", "icims.com", "jobvite.com",
+        "taleo.net", "successfactors.com", "breezy.hr", "recruitee.com",
+    )
 
     def _get_snov_token(self, client_id: str, client_secret: str) -> Optional[str]:
-        response = requests.post(
-            "https://api.snov.io/v1/oauth/access_token",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("access_token")
-
-    def _fetch_snov_emails(self, token: str, domain: str) -> List[dict]:
-        response = requests.get(
-            "https://api.snov.io/v2/domain-emails-with-info",
-            params={
-                "access_token": token,
-                "domain": domain,
-                "type": "all",
-                "limit": 10,
-                "lastId": 0,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        emails = data.get("data", [])
-        return emails if isinstance(emails, list) else []
-
-    def _rank_emails(self, emails: List[dict]) -> Tuple[List[dict], List[dict]]:
-        """Return (verified, unverified), HR-first preference."""
-        normalized = []
-        for item in emails:
-            email_value = item.get("email", "").strip()
-            if not email_value:
-                continue
-            normalized.append(
-                {
-                    "email": email_value,
-                    "status": str(item.get("status", "")).strip().lower(),
-                }
-            )
-
-        hr_emails = [
-            e for e in normalized
-            if any(keyword in e["email"].lower() for keyword in self.HR_KEYWORDS)
-        ]
-
-        pool = hr_emails if hr_emails else normalized
-        verified = [e for e in pool if e.get("status") == "verified"]
-        unverified = [e for e in pool if e.get("status") != "verified"]
-
-        return verified, unverified
-
-    def _format_email_result(self, company: str, verified: List[dict], unverified: List[dict]) -> str:
-        result = f"Emails for {company}:\n"
-
-        if verified:
-            result += "✅ VERIFIED (safe to send):\n"
-            for e in verified[:3]:
-                result += f"• {e['email']} (✓ verified)\n"
-
-        if unverified:
-            result += "⚠️ UNVERIFIED (may bounce):\n"
-            for e in unverified[:3]:
-                status = e.get("status") or "unverified"
-                result += f"• {e['email']} ({status})\n"
-
-        return result.strip()
-
-    def _fallback_ddg_search(self, company: str) -> List[str]:
-        from ddgs import DDGS
-
-        results: List[str] = []
-
-        with DDGS() as ddgs:
-            for item in ddgs.text(
-                f"{company} HR recruiter email careers India",
-                max_results=5,
-            ):
-                body = f"{item.get('title', '')} {item.get('body', '')}"
-                found = extract_emails(body)
-                for email in found:
-                    if any(keyword in email.lower() for keyword in self.HR_KEYWORDS):
-                        results.append(email)
-
-        return list(dict.fromkeys(results))
-
-    def run(self, company: str = "") -> str:
-        try:
-            company = (company or "").strip()
-            if not company:
-                return "Find email error: company name is required."
-
-            client_id = os.getenv("SNOV_CLIENT_ID")
-            client_secret = os.getenv("SNOV_CLIENT_SECRET")
-
-            if client_id and client_secret:
-                try:
-                    token = self._get_snov_token(client_id, client_secret)
-                    if token:
-                        domain = guess_company_domain(company)
-                        if domain:
-                            emails = self._fetch_snov_emails(token, domain)
-                            if emails:
-                                verified, unverified = self._rank_emails(emails)
-                                if verified or unverified:
-                                    return self._format_email_result(company, verified, unverified)
-                except requests.RequestException:
-                    pass
-                except ValueError:
-                    pass
-
-            try:
-                fallback_emails = self._fallback_ddg_search(company)
-                if fallback_emails:
-                    result = f"Emails for {company}:\n"
-                    result += "⚠️ UNVERIFIED (web extracted):\n"
-                    result += "\n".join(f"• {email}" for email in fallback_emails[:3])
-                    return result
-            except Exception:
-                pass
-
-            domain = guess_company_domain(company)
-            if domain:
-                return (
-                    f"⚠️ Could not verify emails for {company}.\n"
-                    f"Possible guesses:\n"
-                    f"• hr@{domain}\n"
-                    f"• careers@{domain}\n"
-                    f"• recruit@{domain}"
-                )
-
-            return f"⚠️ Could not find or guess HR email for {company}."
-
-        except Exception as e:
-            return f"Find email error: {str(e)}"
-
-
-class AutoApplyTool(BaseTool):
-    name = "auto_apply"
-    description = "Auto-apply to a job with correct resume attached"
-
-    REQUIRE_VERIFIED_EMAIL = False
-
-    def _pick_best_email(self, email_result: str):
-    # Try verified first
-     verified_emails = extract_verified_emails_from_result(email_result)
-     if verified_emails:
-        return verified_emails[0]
-    # Always fall back to any email — never block
-     all_emails = extract_emails(email_result)
-     return all_emails[0] if all_emails else None
-
-    def run(self, company: str = "", role: str = "") -> str:
-        try:
-            company = (company or "").strip()
-            role = (role or "").strip()
-
-            if not company:
-                return "Auto apply error: company name is required."
-            if not role:
-                return "Auto apply error: role is required."
-
-            p = ProfileManager()
-
-            # Step 1 — Find HR email
-            print(f"[AutoApply] Finding HR email for {company}...")
-            email_finder = FindHREmailTool()
-            email_result = email_finder.run(company)
-            print(f"[AutoApply] Result: {email_result}")
-
-            hr_email = self._pick_best_email(email_result)
-
-            if not hr_email:
-                if self.REQUIRE_VERIFIED_EMAIL:
-                    return (
-                        f"❌ No verified HR email found for {company}.\n"
-                        f"Run: 'find hr email for {company}' to inspect options.\n"
-                        f"Or manually use: 'send resume email to [email] for {role}'."
-                    )
-                return (
-                    f"❌ Could not find any HR email for {company}.\n"
-                    f"Run: 'find hr email for {company}' to inspect options."
-                )
-
-            print(f"[AutoApply] Using: {hr_email}")
-
-            # Step 2 — Pick correct resume
-            resume_path, resume_label = get_resume_for_role(role)
-            print(f"[AutoApply] Resume: {resume_label} — {resume_path}")
-
-            # Optional local sanity check only
-            if not os.path.exists(resume_path):
-                return (
-                    f"Auto apply error: resume file not found.\n"
-                    f"Expected: {resume_path}\n"
-                    f"Role detected: {resume_label}"
-                )
-
-            # Step 3 — Write cover letter
-            from src.tools.jobs_tool import CoverLetterTool, TrackApplicationTool
-            cover_letter = CoverLetterTool().run(company=company, role=role)
-
-            # Step 4 — Send email with resume
-            name = p.get("name") or "Athul Dev"
-            subject = f"Application for {role} — {name}"
-
-            from src.tools.email_tool import SendEmailWithResumeTool
-            send_result = SendEmailWithResumeTool().run(
-                to=hr_email,
-                subject=subject,
-                body=cover_letter,
-                role=role,
-            )
-
-            # Step 5 — Track application
-            TrackApplicationTool().run(company=company, role=role, status="applied")
-
-            return (
-                f"✅ Applied to {role} at {company}.\n"
-                f"📧 Sent to: {hr_email}\n"
-                f"📄 Resume: {resume_label}\n"
-                f"📋 Application tracked.\n"
-                f"📨 {send_result}"
-            )
-
-        except Exception as e:
-            return f"Auto apply error: {str(e)}"
-        
-
-import os
-import re
-import time
-from urllib.parse import urlparse
-from typing import List, Tuple
-
-from src.tools.base import BaseTool
-from src.memory.profile import ProfileManager
-
-
-EMAIL_REGEX = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-
-
-def normalize_company_name(company: str) -> str:
-    if not company:
-        return ""
-    cleaned = company.lower().strip()
-    cleaned = re.sub(r"[^\w\s]", "", cleaned)
-    cleaned = re.sub(r"\s+", "", cleaned)
-    return cleaned
-
-
-def guess_company_domain(company: str) -> str:
-    base = normalize_company_name(company)
-    return f"{base}.com" if base else ""
-
-
-def extract_emails(text: str) -> List[str]:
-    if not text:
-        return []
-    found = re.findall(EMAIL_REGEX, text)
-    return list(dict.fromkeys(found))
-
-
-def extract_verified_emails_from_result(email_result: str) -> List[str]:
-    if not email_result:
-        return []
-    verified_lines = [
-        line for line in email_result.splitlines()
-        if "✓ verified" in line.lower() or "verified" in line.lower()
-    ]
-    return extract_emails("\n".join(verified_lines))
-
-
-def get_resume_for_role(role: str) -> Tuple[str, str]:
-    p = ProfileManager()
-    role_lower = (role or "").lower()
-
-    if any(word in role_lower for word in ["ai", "machine learning", "ml", "data", "llm", "nlp"]):
-        path = p.get("resume_ai") or "data/resumes/ai_resume.pdf"
-        label = "AI Engineer"
-    elif any(word in role_lower for word in ["fullstack", "full stack", "full-stack", "frontend", "react"]):
-        path = p.get("resume_fullstack") or "data/resumes/fullstack_resume.pdf"
-        label = "Full Stack"
-    else:
-        path = p.get("resume_backend") or "data/resumes/backend_resume.pdf"
-        label = "Backend"
-
-    return path, label
-
-
-class FindHREmailTool(BaseTool):
-    name = "find_hr_email"
-    description = "Find HR or recruiter email for a company"
-
-    HR_KEYWORDS = ["hr", "recruit", "career", "job", "talent", "hire", "people"]
-
-    def _get_snov_token(self, client_id: str, client_secret: str):
-        import requests
         response = requests.post(
             "https://api.snov.io/v1/oauth/access_token",
             data={
@@ -386,7 +142,6 @@ class FindHREmailTool(BaseTool):
         return response.json().get("access_token")
 
     def _fetch_snov_emails(self, token: str, domain: str) -> List[dict]:
-        import requests
         response = requests.get(
             "https://api.snov.io/v2/domain-emails-with-info",
             params={
@@ -440,20 +195,125 @@ class FindHREmailTool(BaseTool):
     def _fallback_ddg_search(self, company: str) -> List[str]:
         from ddgs import DDGS
         results: List[str] = []
+        time.sleep(2)
         with DDGS() as ddgs:
-            for item in ddgs.text(
-                f"{company} HR recruiter email careers India",
-                max_results=5,
-            ):
+            for item in ddgs.text(f"{company} HR recruiter email careers India", max_results=5):
                 body = f"{item.get('title', '')} {item.get('body', '')}"
                 found = extract_emails(body)
                 for email in found:
                     if any(keyword in email.lower() for keyword in self.HR_KEYWORDS):
-                        results.append(email)
+                        # Same domain-relevance check used in _find_general_contact_email —
+                        # without this, unrelated companies' HR emails slip through just
+                        # because they happened to appear in a search result's text
+                        if self._is_company_domain(email, company):
+                            results.append(email)
         return list(dict.fromkeys(results))
 
+    def _scrape_emails_from_url(self, url: str) -> List[str]:
+        try:
+            res = requests.get(url, timeout=5, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            })
+            if res.status_code != 200:
+                return []
+            return extract_emails(res.text)
+        except Exception:
+            return []
+
+    def _is_company_domain(self, email: str, company: str) -> bool:
+        """Rejects emails on unrelated third-party domains — ATS widgets
+        embedded on a careers page frequently leak their own notification
+        addresses, which have nothing to do with the actual company."""
+        email_domain = email.split("@")[-1].lower()
+
+        if any(vendor in email_domain for vendor in self.ATS_VENDOR_DOMAINS):
+            return False
+
+        company_normalized = normalize_company_name(company)
+        if not company_normalized:
+            return False
+        return company_normalized in email_domain
+
+    def _find_general_contact_email(self, company: str) -> Optional[str]:
+        """Checks the company's careers/contact pages directly first — these
+        exist specifically to publish the kind of address a job application
+        should go to. Falls back to DDG-discovered site + same page checks
+        only if the direct domain guess doesn't resolve at all. Filters out
+        any email whose domain isn't actually the company's own."""
+        all_found: List[str] = []
+
+        guessed_domain = guess_company_domain(company)
+        if guessed_domain and domain_has_mx(guessed_domain):
+            for path in self.CONTACT_PATH_CANDIDATES:
+                for scheme in ("https://", "http://"):
+                    url = f"{scheme}{guessed_domain}{path}"
+                    found = self._scrape_emails_from_url(url)
+                    if found:
+                        print(f"[GeneralContact] {url} -> {found[:5]}")
+                        all_found.extend(found)
+                    if len(all_found) >= 5:
+                        break
+                if len(all_found) >= 5:
+                    break
+
+        if not all_found:
+            try:
+                from ddgs import DDGS
+                time.sleep(2)
+                with DDGS() as ddgs:
+                    results = list(ddgs.text(f"{company} official website careers contact", max_results=2))
+                print(f"[GeneralContact] '{company}' DDG fallback -> {len(results)} results")
+
+                for r in results:
+                    base_url = r.get("href", "")
+                    if not base_url:
+                        continue
+                    m = re.match(r'https?://([^/]+)', base_url)
+                    if not m:
+                        continue
+                    found_domain = m.group(1)
+                    for path in self.CONTACT_PATH_CANDIDATES:
+                        url = f"https://{found_domain}{path}"
+                        found = self._scrape_emails_from_url(url)
+                        if found:
+                            print(f"[GeneralContact] {url} -> {found[:5]}")
+                            all_found.extend(found)
+                    if all_found:
+                        break
+            except Exception as e:
+                print(f"[GeneralContact] DDG fallback error for '{company}': {e}")
+
+        if not all_found:
+            return None
+
+        all_found = list(dict.fromkeys(all_found))
+
+        # Reject anything not actually on the company's own domain —
+        # catches ATS-vendor notification addresses like SmartRecruiters
+        all_found = [e for e in all_found if self._is_company_domain(e, company)]
+
+        if not all_found:
+            print(f"[GeneralContact] All candidates for '{company}' rejected as off-domain/ATS-vendor")
+            return None
+
+        for email in all_found:
+            local_part = email.split("@")[0].lower()
+            if any(kw in local_part for kw in self.PRIORITY_PREFIXES):
+                return email
+
+        for email in all_found:
+            local_part = email.split("@")[0].lower()
+            if local_part in self.GENERIC_CONTACT_PREFIXES:
+                return email
+
+        for email in all_found:
+            local_part = email.split("@")[0].lower()
+            if local_part not in self.AVOID_PREFIXES:
+                return email
+
+        return all_found[0]
+
     def run(self, company: str = "") -> str:
-        import requests
         try:
             company = (company or "").strip()
             if not company:
@@ -479,24 +339,30 @@ class FindHREmailTool(BaseTool):
             try:
                 fallback_emails = self._fallback_ddg_search(company)
                 if fallback_emails:
-                    result = f"Emails for {company}:\n"
-                    result += "⚠️ UNVERIFIED (web extracted):\n"
+                    result = f"Emails for {company}:\n⚠️ UNVERIFIED (web extracted):\n"
                     result += "\n".join(f"• {email}" for email in fallback_emails[:3])
                     return result
             except Exception:
                 pass
 
+            general_email = self._find_general_contact_email(company)
+            if general_email and domain_has_mx(general_email.split("@")[-1]):
+                return f"Emails for {company}:\n⚠️ GENERAL CONTACT (not HR-specific, but real, on-domain, and found):\n• {general_email}"
+
             domain = guess_company_domain(company)
             if domain:
-                return (
-                    f"⚠️ Could not verify emails for {company}.\n"
-                    f"Possible guesses:\n"
-                    f"• hr@{domain}\n"
-                    f"• careers@{domain}\n"
-                    f"• recruit@{domain}"
-                )
+                base = domain.replace(".com", "")
+                candidate_domains = [domain, f"{base}.in", f"{base}.co.in", f"{base}.org"]
+                working_domain = next((d for d in candidate_domains if domain_has_mx(d)), None)
 
-            return f"⚠️ Could not find or guess HR email for {company}."
+                if working_domain:
+                    return (
+                        f"⚠️ No directory match for {company}, but {working_domain} is a live mail domain.\n"
+                        f"Best-guess addresses (unverified mailbox — may still bounce):\n"
+                        f"• hr@{working_domain}\n• careers@{working_domain}\n• recruit@{working_domain}"
+                    )
+
+            return f"❌ Could not find or guess a working email domain for {company}. Try a more specific company name or check LinkedIn manually."
 
         except Exception as e:
             return f"Find email error: {str(e)}"
@@ -504,59 +370,69 @@ class FindHREmailTool(BaseTool):
 
 class AutoApplyTool(BaseTool):
     name = "auto_apply"
-    description = "Auto-apply to a job with correct resume attached"
+    description = "Auto-apply to a job by finding HR email, extracting stored JD context, generating a cover letter, and sending email with resume attached."
 
     REQUIRE_VERIFIED_EMAIL = False
 
     def _pick_best_email(self, email_result: str):
         verified_emails = extract_verified_emails_from_result(email_result)
-        if verified_emails:
-            return verified_emails[0]
-        if self.REQUIRE_VERIFIED_EMAIL:
-            return None
-        all_emails = extract_emails(email_result)
-        return all_emails[0] if all_emails else None
+        candidates = verified_emails if verified_emails else extract_emails(email_result)
+        valid_candidates = [e for e in candidates if domain_has_mx(e.split("@")[-1])]
+        if valid_candidates:
+            return valid_candidates[0]
+        return None
 
-    def run(self, company: str = "", role: str = "") -> str:
+    def run(self, company: str = "", role: str = "", job_index: int = None, track: bool = True, jd: str = "") -> str:
         try:
             company = (company or "").strip()
             role = (role or "").strip()
-
-            if not company:
-                return "Auto apply error: company name is required."
-            if not role:
-                return "Auto apply error: role is required."
-
             p = ProfileManager()
 
-            print(f"[AutoApply] Finding HR email for {company}...")
-            email_finder = FindHREmailTool()
-            email_result = email_finder.run(company)
-            print(f"[AutoApply] Result: {email_result}")
+            jd_text = jd
+            if not jd_text:
+                latest_jobs_json = p.get("latest_job_search")
+                if latest_jobs_json:
+                    try:
+                        jobs_list = json.loads(latest_jobs_json)
+                        if isinstance(jobs_list, list) and len(jobs_list) > 0:
+                            if job_index is not None and 1 <= job_index <= len(jobs_list):
+                                target_job = jobs_list[job_index - 1]
+                                company = company or target_job.get("company", "Hiring Company")
+                                role = role or target_job.get("title", "Developer")
+                                jd_text = target_job.get("description", "")
+                            else:
+                                for j in jobs_list:
+                                    c_name = j.get("company", "").lower()
+                                    t_name = j.get("title", "").lower()
+                                    if (company and company.lower() in c_name) or (company and company.lower() in t_name):
+                                        jd_text = j.get("description", "")
+                                        role = role or j.get("title")
+                                        break
+                                if not jd_text:
+                                    jd_text = jobs_list[0].get("description", "")
+                    except Exception as parse_err:
+                        print(f"[AutoApply] Memory parse error: {parse_err}")
 
+            if not company:
+                return "Auto apply error: company name or valid job selection is required."
+            if not role:
+                role = "Full Stack AI Developer"
+
+            print(f"[AutoApply] Locating HR contact for {company}...")
+            email_result = FindHREmailTool().run(company)
             hr_email = self._pick_best_email(email_result)
 
             if not hr_email:
-                return (
-                    f"❌ No verified HR email found for {company}.\n"
-                    f"Try: 'find hr email for {company}' to inspect options.\n"
-                    f"Or: 'send resume email to [email] for {role} at {company}'"
-                )
+                return f"❌ No email with a valid, existing domain found for {company} — skipping to avoid a guaranteed bounce. Raw lookup result:\n{email_result}"
 
-            print(f"[AutoApply] Using: {hr_email}")
+            print(f"[AutoApply] Target HR Email: {hr_email}")
 
-            resume_path, resume_label = get_resume_for_role(role)
-            print(f"[AutoApply] Resume: {resume_label} — {resume_path}")
-
+            resume_path, resume_label = get_resume_for_role(role, jd_text)
             if not os.path.exists(resume_path):
-                return (
-                    f"Auto apply error: resume file not found.\n"
-                    f"Expected: {resume_path}\n"
-                    f"Role detected: {resume_label}"
-                )
+                    return f"Auto apply error: master resume file not found at path: {resume_path}"
 
             from src.tools.jobs_tool import CoverLetterTool, TrackApplicationTool
-            cover_letter = CoverLetterTool().run(company=company, role=role)
+            cover_letter = CoverLetterTool().run(company=company, role=role, jd=jd_text)
 
             name = p.get("name") or "Athul Dev"
             subject = f"Application for {role} — {name}"
@@ -569,14 +445,28 @@ class AutoApplyTool(BaseTool):
                 role=role,
             )
 
-            TrackApplicationTool().run(company=company, role=role, status="applied")
+            send_failed = "❌" in send_result or "error" in send_result.lower()
+            if track:
+                TrackApplicationTool().run(
+                    company=company, role=role,
+                    status=("failed" if send_failed else "applied")
+                )
+
+            if send_failed:
+                return (
+                    f"❌ Application to {company} failed during dispatch.\n"
+                    f"👤 Position: {role}\n"
+                    f"📧 Attempted: {hr_email}\n"
+                    f"📨 Result: {send_result}"
+                )
 
             return (
-                f"✅ Applied to {role} at {company}.\n"
+                f"✅ Application successfully dispatched to {company}.\n"
+                f"👤 Position: {role}\n"
                 f"📧 Sent to: {hr_email}\n"
-                f"📄 Resume: {resume_label}\n"
-                f"📋 Application tracked.\n"
-                f"📨 {send_result}"
+                f"📄 Resume: {resume_label} ({resume_path})\n"
+                f"📋 Status: Application tracked in database.\n"
+                f"📨 Dispatch Result: {send_result}"
             )
 
         except Exception as e:
@@ -585,211 +475,32 @@ class AutoApplyTool(BaseTool):
 
 class BulkApplyTool(BaseTool):
     name = "bulk_apply"
-    description = "Find good job matches and apply only to relevant ones"
-
-    # Real companies known to hire developers in Kochi/Kerala/Remote India
-    KNOWN_COMPANIES = {
-        "Backend Developer": [
-            "Freshworks", "Zoho", "IBS Software", "UST Global",
-            "QBurst", "Experion Technologies", "Chargebee",
-            "Kissflow", "Speridian Technologies", "Envestnet",
-            "Tata Consultancy Services", "Infosys", "Wipro",
-        ],
-        "Full Stack Developer": [
-            "Freshworks", "Zoho", "Razorpay", "QBurst",
-            "Experion Technologies", "BrowserStack", "Chargebee",
-            "UST Global", "IBS Software", "Kissflow",
-            "Postman", "Speridian Technologies",
-        ],
-        "AI Engineer": [
-            "Freshworks", "Zoho", "Sarvam AI", "Mad Street Den",
-            "Krutrim", "Tata Consultancy Services", "Infosys",
-            "UST Global", "QBurst", "Experion Technologies",
-        ],
-    }
-
-    def _infer_role(self, query: str) -> str:
-        query_lower = (query or "").lower()
-        if "ai" in query_lower or "ml" in query_lower:
-            return "AI Engineer"
-        if "fullstack" in query_lower or "full stack" in query_lower:
-            return "Full Stack Developer"
-        return "Backend Developer"
-
-    def _search_jobs(self, query: str, location: str) -> List[dict]:
-        """Search for jobs using DDG."""
-        from ddgs import DDGS
-        raw_jobs = []
-        seen_urls = set()
-
-        searches = [
-            f"{query} jobs {location} 2026 hiring",
-            f"site:linkedin.com/jobs/view {query} {location}",
-            f"site:naukri.com {query} {location} apply",
-        ]
-
-        with DDGS() as ddgs:
-            for search in searches:
-                try:
-                    for r in ddgs.text(search, max_results=5):
-                        url = r.get("href", "")
-                        if url and url not in seen_urls:
-                            seen_urls.add(url)
-                            raw_jobs.append({
-                                "title": r.get("title", ""),
-                                "body": r.get("body", ""),
-                                "url": url,
-                            })
-                except Exception:
-                    continue
-
-        return raw_jobs
-
-    def _score_job(self, job: dict, role: str, skill_list: List[str]) -> int:
-        """Score a job listing for relevance."""
-        title_lower = job["title"].lower()
-        body_lower = job["body"].lower()
-        combined = title_lower + " " + body_lower
-        score = 0
-
-        role_keywords = {
-            "Backend Developer": ["backend", "python", "fastapi", "django", "api", "flask", "node"],
-            "Full Stack Developer": ["fullstack", "full stack", "react", "frontend", "vue", "angular"],
-            "AI Engineer": ["ai", "machine learning", "llm", "nlp", "deep learning", "ml engineer"],
-        }
-
-        if any(w in title_lower for w in ["developer", "engineer", "programmer", "software"]):
-            score += 30
-
-        for kw in role_keywords.get(role, []):
-            if kw in title_lower:
-                score += 20
-            elif kw in body_lower:
-                score += 10
-
-        for skill in skill_list:
-            if len(skill) > 2 and skill in combined:
-                score += 8
-
-        if any(w in combined for w in ["kochi", "kerala", "remote", "wfh", "work from home"]):
-            score += 20
-
-        if any(w in title_lower for w in ["senior", "lead", "manager", "director", "head", "principal"]):
-            score -= 15
-
-        if any(w in title_lower for w in ["sales", "marketing", "accountant", "finance"]):
-            score -= 50
-
-        return score
-
-    def _find_companies_from_jobs(self, scored_jobs: List[dict]) -> List[str]:
-        """Try to extract real company names from LinkedIn direct job pages only."""
-        companies = []
-
-        for job in scored_jobs[:10]:
-            url = job.get("url", "")
-            title = job.get("title", "")
-
-            # Only extract from LinkedIn direct job view pages
-            if "linkedin.com/jobs/view" not in url:
-                continue
-
-            # Pattern: "Job Title at Company Name"
-            match = re.search(
-                r"\bat\s+([A-Z][A-Za-z0-9\s&]+?)(?:\s+in\s|\s*[-|–|·]|$)",
-                title
-            )
-            if match:
-                candidate = match.group(1).strip().rstrip(".,- ")
-                # Validate
-                skip = {
-                    "backend", "developer", "engineer", "software", "jobs",
-                    "job", "hiring", "fresher", "kochi", "kerala", "india",
-                    "remote", "python", "react", "fullstack", "full stack"
-                }
-                words = candidate.lower().split()
-                if (2 < len(candidate) < 40 and
-                        not any(w in skip for w in words)):
-                    if candidate not in companies:
-                        companies.append(candidate)
-                        print(f"[BulkApply] Found company from LinkedIn: {candidate}")
-
-        return companies
+    description = "Apply to all jobs found in the recent search results"
 
     def run(self, query: str = "") -> str:
         try:
             p = ProfileManager()
-            location = p.get("location") or "Kochi Kerala"
-            role = self._infer_role(query)
-            skills = (p.get("skills") or "").lower()
-            skill_list = [s.strip() for s in skills.split(",") if s.strip()]
+            latest_jobs = p.get("latest_job_search")
 
-            print(f"[BulkApply] Searching {role} jobs...")
+            if not latest_jobs:
+                return "No recent job search found. Please search for jobs first."
 
-            # Step 1 — Search jobs
-            raw_jobs = self._search_jobs(query or role, location)
-            print(f"[BulkApply] Raw jobs found: {len(raw_jobs)}")
-
-            if not raw_jobs:
-                return "No jobs found. Check internet connection."
-
-            # Step 2 — Score jobs
-            scored = []
-            for job in raw_jobs:
-                score = self._score_job(job, role, skill_list)
-                if score >= 25:
-                    job["score"] = score
-                    scored.append(job)
-
-            scored.sort(key=lambda x: x["score"], reverse=True)
-            print(f"[BulkApply] Scored jobs: {len(scored)}")
-
-            # Step 3 — Build report of found jobs
-            report = f"🎯 Found {len(scored) if scored else len(raw_jobs)} jobs for {role}:\n\n"
-            display_jobs = scored[:6] if scored else raw_jobs[:6]
-            for i, job in enumerate(display_jobs, 1):
-                report += f"{i}. {job['title']}\n"
-                if "score" in job:
-                    report += f"   📊 Match: {job['score']}%\n"
-                report += f"   🔗 {job['url'][:80]}\n\n"
-
-            # Step 4 — Get companies to apply to
-            # First try extracting from LinkedIn direct pages
-            companies = self._find_companies_from_jobs(scored if scored else raw_jobs)
-
-            # Always use known companies as primary/fallback
-            known = self.KNOWN_COMPANIES.get(role, ["Freshworks", "Zoho", "Chargebee"])
-
-            # Mix extracted + known, deduplicated
-            all_companies = companies + [c for c in known if c not in companies]
-            apply_to = all_companies[:3]
-
-            if companies:
-                report += f"📌 Found companies from job listings: {', '.join(companies)}\n"
-            report += f"📤 Applying to: {', '.join(apply_to)}\n\n"
-
-            print(f"[BulkApply] Applying to: {apply_to}")
-
-            # Step 5 — Apply with delay
+            jobs = json.loads(latest_jobs)
             auto_apply = AutoApplyTool()
-            applied = 0
-            skipped = 0
+            report = f"🎯 Starting bulk apply for {len(jobs)} jobs:\n\n"
+            applied, skipped = 0, 0
 
-            for company in apply_to:
-                print(f"[BulkApply] Applying to {company}...")
-                result = auto_apply.run(company=company, role=role)
+            for idx, job in enumerate(jobs[:5], 1):
+                company = job.get("company", "Hiring Company")
+                role = job.get("title", "Developer")
 
-                if "No verified" in result or "❌" in result:
-                    report += f"⏭️ {company}: Skipped — no verified HR email\n"
+                result = auto_apply.run(company=company, role=role, job_index=idx)
+                if "❌" in result or "error" in result.lower():
+                    report += f"⏭️ Job #{idx} ({company}): Skipped — {result}\n"
                     skipped += 1
-                elif "✅" in result:
-                    report += f"✅ {company}: Application sent!\n"
-                    applied += 1
                 else:
-                    report += f"⚠️ {company}: {result[:80]}\n"
-                    skipped += 1
-
-                time.sleep(3)
+                    report += f"✅ Job #{idx} ({company}): Application dispatched!\n"
+                    applied += 1
 
             report += f"\n📊 Summary: {applied} sent, {skipped} skipped"
             return report

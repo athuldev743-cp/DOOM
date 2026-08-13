@@ -1,23 +1,29 @@
-import pyttsx3
+import os
+import edge_tts
 
-engine = pyttsx3.init()
+try:
+    import pyttsx3
+    _engine = pyttsx3.init()
+    _engine.setProperty('rate', 175)
+    _engine.setProperty('volume', 1.0)
+    _PYTTSX3_AVAILABLE = True
+except Exception:
+    _PYTTSX3_AVAILABLE = False
 
-# Set voice properties
-engine.setProperty('rate', 175)
-engine.setProperty('volume', 1.0)
 
-# Use a better voice if available
-voices = engine.getProperty('voices')
-for voice in voices:
-    if 'david' in voice.name.lower() or 'mark' in voice.name.lower():
-        engine.setProperty('voice', voice.id)
-        break
+def speak_local(text: str):
+    """Fallback for offline local terminal testing."""
+    if not _PYTTSX3_AVAILABLE:
+        print("[Voice] pyttsx3 / espeak unavailable in this environment.")
+        return
+    print(f"[Voice] Speaking locally...")
+    _engine.say(text)
+    _engine.runAndWait()
 
-def speak(text: str):
-    print(f"[Voice] Speaking...")
-    engine.say(text)
-    engine.runAndWait()
 
-def list_voices():
-    for i, voice in enumerate(voices):
-        print(f"{i}: {voice.name} — {voice.id}")
+async def speak(text: str, output_path: str = "src/api/static/speech.mp3") -> str:
+    """Cloud-friendly async TTS."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    communicate = edge_tts.Communicate(text, "en-US-ChristopherNeural", rate="+15%")
+    await communicate.save(output_path)
+    return output_path

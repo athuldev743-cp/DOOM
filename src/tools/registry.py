@@ -23,7 +23,8 @@ from src.tools.email_tool import (
 
 from src.tools.jobs_tool import (
     JobSearchTool, ScoreJDTool, CoverLetterTool,
-    TrackApplicationTool, ListApplicationsTool
+    TrackApplicationTool, ListApplicationsTool,
+    
 )
 
 
@@ -64,7 +65,7 @@ TOOLS = {
     "whatsapp_api_send": WhatsAppSendTool(),
     "whatsapp_broadcast": WhatsAppBroadcastTool(),
     "whatsapp_api_resume": WhatsAppResumeTool(),
-
+    
 }
 
 

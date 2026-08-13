@@ -121,6 +121,11 @@ find and apply best backend jobs → TOOL: bulk_apply / ARGS: backend developer
 find and apply best fullstack jobs → TOOL: bulk_apply / ARGS: fullstack developer
 find and apply best ai jobs → TOOL: bulk_apply / ARGS: AI engineer
 find and apply all jobs → TOOL: bulk_apply / ARGS: backend fullstack AI developer
+apply → TOOL: apply_all_channels / ARGS: none
+apply all → TOOL: apply_all_channels / ARGS: none
+apply now → TOOL: apply_all_channels / ARGS: none
+apply for these jobs → TOOL: apply_all_channels / ARGS: none
+apply to these jobs → TOOL: apply_all_channels / ARGS: none
 
 HR EMAIL:
 find hr email for X → TOOL: find_hr_email / ARGS: X
@@ -333,13 +338,12 @@ class Agent:
         elif tool_name == "daily_briefing":
             return tool.run()
 
-        elif tool_name == "send_email_resume":
+        elif tool_name == "send_resume_email":
             parts = args.split("|")
             to = parts[0].strip()
-            subject = parts[1].strip() if len(parts) > 1 else ""
-            body = parts[2].strip() if len(parts) > 2 else ""
-            role = parts[3].strip() if len(parts) > 3 else ""
-            return tool.run(to=to, subject=subject, body=body, role=role)
+            role = parts[1].strip() if len(parts) > 1 else ""
+            return tool.run(to=to, role=role)
+    
 
         elif tool_name in [
             "list_contacts",
@@ -371,6 +375,7 @@ class Agent:
     async def chat(self, user_input: str) -> str:
         messages = self._build_messages(user_input)
         response = await chat(messages)
+        print(f"[Agent] Raw LLM response: {response!r}") 
 
         tool_name, args = self._parse_tool_call(response)
 
@@ -381,10 +386,14 @@ class Agent:
                 tool_result = await self._run_tool(tool_name, args)
 
                 if (
-                    tool_result.startswith("CALL:")
-                    or tool_result.startswith("WHATSAPP:")
-                    or "NOT_FOUND" in tool_result
-                ):
+    tool_result.startswith("CALL:")
+    or tool_result.startswith("WHATSAPP:")
+    or tool_result.startswith("YOUTUBE:")
+    or tool_result.startswith("APP:")
+    or tool_result.startswith("JOBS_DATA:")
+    or tool_result.startswith("APPLY_REPORT:")
+    or "NOT_FOUND" in tool_result
+):
                     self.memory.save_message("user", user_input)
                     self.memory.save_message("assistant", tool_result)
                     return tool_result

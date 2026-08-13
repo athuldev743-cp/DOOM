@@ -1,4 +1,5 @@
 import asyncio
+from src.api.app import app
 from rich.console import Console
 from rich.prompt import Prompt
 from rich.panel import Panel
