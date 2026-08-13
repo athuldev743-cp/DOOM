@@ -30,10 +30,37 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 ```
 
 - **Agent core**: a ReAct-style loop — the LLM decides whether to call a tool (`TOOL: name` / `ARGS: ...`) or answer directly, tool results get fed back for a final grounded response
-- **LLM layer**: cascading fallback across 4 providers, 14 total model attempts, so the assistant stays available even under rate limits or provider outages
+- **LLM layer**: cascading fallback across 4 providers, 14 total model attempts, so the assistant stays available even under rate limits or provider outages, with full call tracing via Langfuse (see below)
 - **Tool registry**: 35 tools across job search/applications, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
-- **Memory**: SQLite-backed conversation history plus a persistent user profile store, injected into the system prompt on every turn
+- **Memory**: PostgreSQL (SQLAlchemy) for conversation history, user profile, and job data; injected into the system prompt on every turn
 - **Voice I/O**: speech-to-text input and text-to-speech output with local audio caching
+
+---
+
+## LLM observability (Langfuse)
+
+Every call through the fallback chain is traced — which provider/model actually served the response, per-attempt latency (including failed attempts before a successful fallback), and token usage/cost where the provider returns it. This turned "the fallback chain works" from a claim into something verifiable: a real rate-limit event was captured live during testing, showing Gemini failing with a 429, immediately falling through two more Gemini model variants, and eventually succeeding — with the full cascade timed and visible in the trace.
+
+Self-hosted via Docker Compose for local development, with a Langfuse Cloud option for tracing the production deployment.
+
+---
+
+## Background job discovery pipeline
+
+Job search went through a real architecture correction worth documenting. The first version had the chat-triggered `job_search` tool perform a live, multi-platform search (Naukri, Wellfound, Indeed, LinkedIn) on every request — taking 20-30+ seconds and re-showing the same jobs on repeat searches, since nothing tracked what had already been surfaced.
+
+**Root causes found and fixed:**
+- **Dead code**: two separate `JobSearchTool` implementations existed; only one was actually wired into the tool registry, making the other confusing/misleading to edit
+- **A broken conditional** silently defeated an existing optimization meant to skip live page-fetches for platforms known to block scraping (Naukri, Indeed) — every job was being fetched anyway, wasting time on requests that were essentially guaranteed to fail
+- **No persistence** — results were only cached as a single overwritten blob, with no record of what had already been shown
+
+**The fix — separating discovery from delivery:**
+Rather than bolting dedup onto the live-search tool, the system now cleanly separates two responsibilities using tables that already existed in the schema but were unused (`SeenUrl`, `DailyJobMatch`):
+
+- **Discovery** (`src/scripts/scan_jobs.py`, run hourly via GitHub Actions): searches all 4 platforms, deduplicates against `SeenUrl`, scores each match, and stores results in `DailyJobMatch` with a `sent=False` flag
+- **Delivery** (the chat-facing `job_search` tool): reads the highest-scored unsent matches directly from the database and marks them delivered — no live search, no re-fetching, no repeats
+
+**Result**: chat responses went from 20-30+ seconds to near-instant, every response is guaranteed new (verified: asking twice in a row correctly returns "no new matches" the second time), and job matches are pre-scored against skill relevance before ever reaching the user.
 
 ---
 
@@ -93,8 +120,9 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 | Agent framework | Custom ReAct-style loop (no LangChain) |
 | LLM providers | Gemini, OpenAI, Groq, OpenRouter (cascading fallback) |
 | RAG | ChromaDB, SentenceTransformers, PyMuPDF |
-| Memory | SQLite |
+| Memory | PostgreSQL (SQLAlchemy) |
 | API | FastAPI |
+| Observability | Langfuse (self-hosted via Docker + cloud) |
 | Voice | Speech-to-text + text-to-speech with local mp3 caching |
 | CLI | Rich (styled terminal interface) |
 | Automation | GitHub Actions (scheduled job scanning, morning digest) |
@@ -161,8 +189,10 @@ src/
 
 - [ ] Circuit breaker / shorter timeout budget on the LLM fallback chain to bound worst-case latency
 - [ ] Structured eval suite for tool-selection accuracy (does the agent pick the right tool for ambiguous phrasing?)
-- [ ] Migrate secrets fully to environment-only config (remove `credentials.json`/`token.json` from repo entirely, already gitignored)
-- [ ] Observability (Langfuse) for LLM call tracing across the fallback chain — which provider actually served each response, latency per tier
+- [x] Observability (Langfuse) for LLM call tracing across the fallback chain — which provider actually served each response, latency per tier
+- [x] Fixed job-search performance and correctness (dead code, broken conditional, missing persistence — see Background job discovery pipeline)
+- [ ] WhatsApp-based application delivery (send resume + cover message directly to HR contacts)
+- [ ] Concurrent fetching for the background scanner itself (currently sequential per query, same pattern already fixed once in the delivery path)
 
 ---
 
