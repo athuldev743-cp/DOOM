@@ -8,10 +8,9 @@ from src.memory.profile import ProfileManager
 import re
 from src.tools.company_extract import extract_company
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta
 
-from src.memory.database import SessionLocal, DailyJobMatch
-
-
+from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl
 
 
 def _load_applied_keys(p: ProfileManager) -> set:
@@ -101,16 +100,26 @@ def extract_jsonld_jobposting(html: str) -> dict:
         pass
     return {}
 
+
 def get_locations(p: ProfileManager) -> list:
     """Location is stored as a comma-separated string so multiple target
     locations (e.g. 'Kochi Kerala, NYC') all get searched, not just the last one set."""
     raw = p.get('location') or 'Kochi Kerala'
     return [loc.strip() for loc in raw.split(',') if loc.strip()]
 
+
 class JobSearchTool(BaseTool):
     name = "job_search"
     description = "Search only real, previously-unseen job postings on Naukri, Wellfound, Indeed, LinkedIn"
- 
+
+    BROKEN_MARKERS = [
+        "we cannot provide a description",
+        "you don't have permission to access",
+        "reference #",
+        "the site owner hides",
+    ]
+    NO_FETCH_PLATFORMS = {"naukri", "indeed"}
+
     def _fetch_page(self, url: str) -> dict:
         try:
             headers = {
@@ -128,16 +137,8 @@ class JobSearchTool(BaseTool):
             return {"description": text[:2500], "jsonld": jsonld}
         except Exception:
             return {"description": "", "jsonld": {}}
- 
-    BROKEN_MARKERS = [
-        "we cannot provide a description",
-        "you don't have permission to access",
-        "reference #",
-        "the site owner hides",
-    ]
-    NO_FETCH_PLATFORMS = {"naukri", "indeed"}
- 
-    def _collect_candidates(self, searches, applied_keys) -> list[dict]:
+
+    def _collect_candidates(self, searches, applied_keys) -> list:
         """Phase 1: run all DDG searches, apply cheap filters (no network fetch yet).
         Returns a list of candidate dicts still needing a page fetch (or already resolved
         for NO_FETCH_PLATFORMS)."""
@@ -145,7 +146,7 @@ class JobSearchTool(BaseTool):
         rejected = defaultdict(int)
         seen_urls = set()
         candidates = []
- 
+
         with DDGS() as ddgs:
             for search_query, expected_platform in searches:
                 try:
@@ -155,67 +156,65 @@ class JobSearchTool(BaseTool):
                         url = r.get('href', '')
                         title = r.get('title', '')
                         body = r.get('body', '')
- 
+
                         if not url or url in seen_urls:
                             continue
                         seen_urls.add(url)
- 
+
                         platform = detect_platform(url)
                         if platform != expected_platform:
                             rejected["platform_mismatch"] += 1
                             print(f"[DEBUG mismatch] expected={expected_platform} got={platform} url={url}")
                             continue
- 
+
                         if not is_real_listing_url(url, platform):
                             rejected["not_real_url"] += 1
                             print(f"[DEBUG not_real_url] platform={platform} url={url}")
                             continue
- 
+
                         candidates.append({
                             "url": url, "title": title, "body": body, "platform": platform,
                         })
                 except Exception as e:
                     print(f"[JobSearch] search failed for '{search_query}': {e}")
                     continue
- 
+
         self._rejected = rejected
         return candidates
- 
-    def _resolve_candidate(self, c: dict, applied_keys) -> dict | None:
+
+    def _resolve_candidate(self, c: dict, applied_keys):
         """Phase 2 per-candidate: does the (possibly concurrent) page fetch and
         applies the remaining filters. Returns a finished job dict, or None if rejected."""
         url, title, body, platform = c["url"], c["title"], c["body"], c["platform"]
- 
+
         if platform in self.NO_FETCH_PLATFORMS:
-            # Deliberately skip the live fetch — these sites reliably block/redirect
-            # scraping, so we use the DDG snippet directly instead of wasting a request.
             jsonld = {}
             description = body
         else:
             page_data = self._fetch_page(url)
             jsonld = page_data["jsonld"]
             description = page_data["description"] if len(page_data["description"]) > 200 else body
- 
+
         company = jsonld.get("company") or extract_company(title, platform)
         final_title = jsonld.get("title") or title
- 
+
         if not company:
             self._rejected["no_company"] += 1
             return None
- 
+
         if final_title.lower().count(" at ") >= 2:
             self._rejected["duplicate_title"] += 1
             return None
- 
+
         if _is_already_applied(company, final_title, applied_keys):
             self._rejected["already_applied"] += 1
             return None
- 
+
         desc_lower = description.lower()
         if any(marker in desc_lower for marker in self.BROKEN_MARKERS):
             self._rejected["broken_page"] += 1
             return None
- 
+
         return {
             "title": final_title,
             "company": company,
@@ -225,15 +224,14 @@ class JobSearchTool(BaseTool):
             "platform": platform,
             "auto_apply": JOB_PLATFORMS.get(platform, {}).get("auto_apply", False),
         }
-def run(self, query: str = "", limit: int = 20) -> str:
+
+    def run(self, query: str = "", limit: int = 20) -> str:
         """Hybrid delivery: serves whatever's already in the pool (instant),
         then tops up with a LIVE search only for the shortfall if the pool
         has fewer than `limit` unsent jobs. Enforces a 24h cooldown between
         full deliveries.
         """
         try:
-            from datetime import datetime, timedelta
-
             p_check = ProfileManager()
             last_search_str = p_check.get("last_job_search_at")
             if last_search_str:
@@ -249,7 +247,7 @@ def run(self, query: str = "", limit: int = 20) -> str:
                             f"{hours_left}h {minutes_left}m — or check 'my applications' to review what's pending."
                         )
                 except Exception:
-                    pass  # malformed timestamp, don't block the search over it
+                    pass
 
             db = SessionLocal()
 
@@ -263,7 +261,6 @@ def run(self, query: str = "", limit: int = 20) -> str:
                 )
 
                 jobs = []
-
                 for m in pool_matches:
                     jobs.append({
                         "title": m.title,
@@ -272,19 +269,13 @@ def run(self, query: str = "", limit: int = 20) -> str:
                         "description": m.description or "",
                         "url": m.url,
                         "platform": m.source,
-                        "auto_apply": JOB_PLATFORMS.get(
-                            m.source, {}
-                        ).get("auto_apply", False),
+                        "auto_apply": JOB_PLATFORMS.get(m.source, {}).get("auto_apply", False),
                         "score": m.score,
                     })
                     m.sent = True
 
                 shortfall = limit - len(jobs)
-
-                print(
-                    f"[JobSearch] Pool had {len(pool_matches)} unsent "
-                    f"— shortfall of {shortfall}"
-                )
+                print(f"[JobSearch] Pool had {len(pool_matches)} unsent — shortfall of {shortfall}")
 
                 if shortfall > 0:
                     p = ProfileManager()
@@ -292,12 +283,8 @@ def run(self, query: str = "", limit: int = 20) -> str:
                     locations = get_locations(p)
 
                     target_roles = (
-                        query.strip()
-                        if query and query.strip()
-                        else (
-                            p.get("target_roles")
-                            or "AI engineer software engineer backend fullstack developer"
-                        )
+                        query.strip() if query and query.strip()
+                        else (p.get("target_roles") or "AI engineer software engineer backend fullstack developer")
                     )
 
                     searches = []
@@ -311,27 +298,19 @@ def run(self, query: str = "", limit: int = 20) -> str:
 
                     candidates = self._collect_candidates(searches, applied_keys)
 
-                    from src.memory.database import SeenUrl
-
                     candidate_urls = [c["url"] for c in candidates if c.get("url")]
-
                     if candidate_urls:
                         already_seen = {
-                            row.url
-                            for row in db.query(SeenUrl.url)
-                            .filter(SeenUrl.url.in_(candidate_urls))
-                            .all()
+                            row.url for row in db.query(SeenUrl.url).filter(SeenUrl.url.in_(candidate_urls)).all()
                         }
                     else:
                         already_seen = set()
-
                     candidates = [c for c in candidates if c.get("url") not in already_seen]
 
                     resolved = []
                     with ThreadPoolExecutor(max_workers=8) as executor:
                         futures = {
-                            executor.submit(self._resolve_candidate, c, applied_keys): c
-                            for c in candidates
+                            executor.submit(self._resolve_candidate, c, applied_keys): c for c in candidates
                         }
                         for future in as_completed(futures):
                             try:
@@ -350,24 +329,15 @@ def run(self, query: str = "", limit: int = 20) -> str:
                     for job in top_up:
                         db.add(SeenUrl(url=job["url"], first_seen=now))
                         db.add(DailyJobMatch(
-                            url=job["url"],
-                            title=job["title"],
-                            company=job["company"],
-                            description=job["description"][:4000],
-                            source=job["platform"],
-                            found_at=now,
-                            sent=True,
-                            applied=False,
+                            url=job["url"], title=job["title"], company=job["company"],
+                            description=job["description"][:4000], source=job["platform"],
+                            found_at=now, sent=True, applied=False,
                         ))
                         jobs.append({
-                            "title": job["title"],
-                            "company": job["company"],
-                            "snippet": job["description"][:200],
-                            "description": job["description"],
-                            "url": job["url"],
-                            "platform": job["platform"],
-                            "auto_apply": job["auto_apply"],
-                            "score": 0,
+                            "title": job["title"], "company": job["company"],
+                            "snippet": job["description"][:200], "description": job["description"],
+                            "url": job["url"], "platform": job["platform"],
+                            "auto_apply": job["auto_apply"], "score": 0,
                         })
 
                     print(f"[JobSearch] Top-up added {len(top_up)} live-found jobs")
@@ -390,11 +360,7 @@ def run(self, query: str = "", limit: int = 20) -> str:
                     plat = job["platform"]
                     platform_counts[plat] = platform_counts.get(plat, 0) + 1
 
-                result = "JOBS_DATA:" + json.dumps({
-                    "jobs": jobs,
-                    "platform_counts": platform_counts,
-                })
-
+                result = "JOBS_DATA:" + json.dumps({"jobs": jobs, "platform_counts": platform_counts})
                 print(f"[JobSearch] Returning {len(jobs)} jobs")
                 return result
 
@@ -407,6 +373,7 @@ def run(self, query: str = "", limit: int = 20) -> str:
         except Exception as e:
             print(f"[JobSearch] ERROR: {e}")
             return f"Job search error: {str(e)}"
+
 
 def apply_to_single_job(index: int) -> dict:
     """Manual platform apply — user clicks through to the real listing.
@@ -456,9 +423,10 @@ def email_only_for_job(index: int) -> dict:
         company=job.get("company", "Hiring Company"),
         role=job.get("title", "Developer"),
         job_index=index + 1,
-        track=False,  # sending the email isn't the same as applying
+        track=False,
     )
     return {"success": "✅" in result, "message": result}
+
 
 class CoverLetterTool(BaseTool):
     name = "cover_letter"
