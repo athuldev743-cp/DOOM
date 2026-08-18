@@ -225,68 +225,188 @@ class JobSearchTool(BaseTool):
             "platform": platform,
             "auto_apply": JOB_PLATFORMS.get(platform, {}).get("auto_apply", False),
         }
- 
-    def run(self, query: str = "", limit: int = 15) -> str:
-        """Serves jobs from the pool the background scanner (scan_jobs.py) already
-        found, scored, and deduped — no live search here, so this returns instantly
-        instead of taking 20-30+ seconds."""
+def run(self, query: str = "", limit: int = 20) -> str:
+        """Hybrid delivery: serves whatever's already in the pool (instant),
+        then tops up with a LIVE search only for the shortfall if the pool
+        has fewer than `limit` unsent jobs. Enforces a 24h cooldown between
+        full deliveries.
+        """
         try:
+            from datetime import datetime, timedelta
+
+            p_check = ProfileManager()
+            last_search_str = p_check.get("last_job_search_at")
+            if last_search_str:
+                try:
+                    last_search_at = datetime.fromisoformat(last_search_str)
+                    elapsed = datetime.utcnow() - last_search_at
+                    if elapsed < timedelta(hours=24):
+                        remaining = timedelta(hours=24) - elapsed
+                        hours_left = int(remaining.total_seconds() // 3600)
+                        minutes_left = int((remaining.total_seconds() % 3600) // 60)
+                        return (
+                            f"You already got today's batch of jobs. Next batch available in "
+                            f"{hours_left}h {minutes_left}m — or check 'my applications' to review what's pending."
+                        )
+                except Exception:
+                    pass  # malformed timestamp, don't block the search over it
+
             db = SessionLocal()
+
             try:
-                unsent = (
+                pool_matches = (
                     db.query(DailyJobMatch)
                     .filter_by(sent=False)
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
                 )
- 
-                if not unsent:
-                    return (
-                        "No new job matches right now — the background scanner runs "
-                        "hourly and the pool is currently empty. Check back soon, or "
-                        "say 'run job scan now' to trigger one manually."
-                    )
- 
+
                 jobs = []
-                for i, m in enumerate(unsent):
+
+                for m in pool_matches:
                     jobs.append({
-                        "id": f"job_{i}",
-                        "index": i,
                         "title": m.title,
                         "company": m.company,
                         "snippet": (m.description or "")[:200],
                         "description": m.description or "",
                         "url": m.url,
                         "platform": m.source,
-                        "auto_apply": JOB_PLATFORMS.get(m.source, {}).get("auto_apply", False),
+                        "auto_apply": JOB_PLATFORMS.get(
+                            m.source, {}
+                        ).get("auto_apply", False),
                         "score": m.score,
                     })
-                    m.sent = True  # mark delivered so it won't be shown again
- 
+                    m.sent = True
+
+                shortfall = limit - len(jobs)
+
+                print(
+                    f"[JobSearch] Pool had {len(pool_matches)} unsent "
+                    f"— shortfall of {shortfall}"
+                )
+
+                if shortfall > 0:
+                    p = ProfileManager()
+                    applied_keys = _load_applied_keys(p)
+                    locations = get_locations(p)
+
+                    target_roles = (
+                        query.strip()
+                        if query and query.strip()
+                        else (
+                            p.get("target_roles")
+                            or "AI engineer software engineer backend fullstack developer"
+                        )
+                    )
+
+                    searches = []
+                    for location in locations[:1]:
+                        searches.extend([
+                            (f'site:naukri.com/job-listings "{target_roles}" {location}', "naukri"),
+                            (f'site:wellfound.com/jobs "{target_roles}"', "wellfound"),
+                            (f'site:indeed.com "{target_roles}" {location}', "indeed"),
+                            (f'site:linkedin.com/jobs/view "{target_roles}" {location}', "linkedin"),
+                        ])
+
+                    candidates = self._collect_candidates(searches, applied_keys)
+
+                    from src.memory.database import SeenUrl
+
+                    candidate_urls = [c["url"] for c in candidates if c.get("url")]
+
+                    if candidate_urls:
+                        already_seen = {
+                            row.url
+                            for row in db.query(SeenUrl.url)
+                            .filter(SeenUrl.url.in_(candidate_urls))
+                            .all()
+                        }
+                    else:
+                        already_seen = set()
+
+                    candidates = [c for c in candidates if c.get("url") not in already_seen]
+
+                    resolved = []
+                    with ThreadPoolExecutor(max_workers=8) as executor:
+                        futures = {
+                            executor.submit(self._resolve_candidate, c, applied_keys): c
+                            for c in candidates
+                        }
+                        for future in as_completed(futures):
+                            try:
+                                result = future.result()
+                                if result:
+                                    resolved.append(result)
+                                if len(resolved) >= shortfall:
+                                    break
+                            except Exception as e:
+                                print(f"[JobSearch] Candidate resolution failed: {e}")
+                                continue
+
+                    top_up = resolved[:shortfall]
+                    now = datetime.utcnow()
+
+                    for job in top_up:
+                        db.add(SeenUrl(url=job["url"], first_seen=now))
+                        db.add(DailyJobMatch(
+                            url=job["url"],
+                            title=job["title"],
+                            company=job["company"],
+                            description=job["description"][:4000],
+                            source=job["platform"],
+                            found_at=now,
+                            sent=True,
+                            applied=False,
+                        ))
+                        jobs.append({
+                            "title": job["title"],
+                            "company": job["company"],
+                            "snippet": job["description"][:200],
+                            "description": job["description"],
+                            "url": job["url"],
+                            "platform": job["platform"],
+                            "auto_apply": job["auto_apply"],
+                            "score": 0,
+                        })
+
+                    print(f"[JobSearch] Top-up added {len(top_up)} live-found jobs")
+
                 db.commit()
- 
+
+                if not jobs:
+                    return "No jobs found right now, even after a live top-up search — try again shortly."
+
+                for i, job in enumerate(jobs):
+                    job["id"] = f"job_{i}"
+                    job["index"] = i
+
+                p = ProfileManager()
+                p.set("latest_job_search", json.dumps(jobs), "career")
+                p.set("last_job_search_at", datetime.utcnow().isoformat(), "career")
+
                 platform_counts = {}
                 for job in jobs:
                     plat = job["platform"]
                     platform_counts[plat] = platform_counts.get(plat, 0) + 1
- 
-                p = ProfileManager()
-                p.set("latest_job_search", json.dumps(jobs), "career")
- 
-                return "JOBS_DATA:" + json.dumps({"jobs": jobs, "platform_counts": platform_counts})
- 
+
+                result = "JOBS_DATA:" + json.dumps({
+                    "jobs": jobs,
+                    "platform_counts": platform_counts,
+                })
+
+                print(f"[JobSearch] Returning {len(jobs)} jobs")
+                return result
+
             except Exception:
                 db.rollback()
                 raise
             finally:
                 db.close()
- 
-        except Exception as e:
-            return f"Job search error: {str(e)}"
- 
- 
 
+        except Exception as e:
+            print(f"[JobSearch] ERROR: {e}")
+            return f"Job search error: {str(e)}"
 
 def apply_to_single_job(index: int) -> dict:
     """Manual platform apply — user clicks through to the real listing.

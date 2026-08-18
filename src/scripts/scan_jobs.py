@@ -23,7 +23,7 @@ ROLE_QUERIES = [
     "AI Engineer", "Software Engineer", "AI Architect",
     "Backend Developer", "Full Stack Developer",
 ]
-MAX_POOL_SIZE = 50  # keep the rolling pool capped — trim lowest-scored when exceeded
+MAX_POOL_SIZE = 20  # keep the rolling pool capped — trim lowest-scored when exceeded
 
 
 
