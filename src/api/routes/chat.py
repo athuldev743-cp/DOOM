@@ -2,17 +2,23 @@ import json
 import os
 import asyncio
 import re
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest
-from src.api.deps import agent
-
+from src.api.deps import agent, get_current_identity, Identity
+from src.api.auth import HR_FALLBACK_RESPONSE
 
 router = APIRouter()
 
 
 @router.post("/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(
+    request: ChatRequest,
+    identity: Identity = Depends(get_current_identity),
+):
+    if not identity.is_owner:
+        return {"response": HR_FALLBACK_RESPONSE, "audio_url": None, "status": "ok"}
+
     from src.voice.tts_server import text_to_speech
 
     # Get text response immediately
@@ -40,8 +46,16 @@ async def chat_endpoint(request: ChatRequest):
 
 
 @router.post("/chat-stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    identity: Identity = Depends(get_current_identity),
+):
     async def generate():
+        if not identity.is_owner:
+            yield f"data: {json.dumps({'type': 'text', 'content': HR_FALLBACK_RESPONSE})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return
+
         response = await agent.chat(request.message)
         yield f"data: {json.dumps({'type': 'text', 'content': response})}\n\n"
 
@@ -166,5 +180,3 @@ async def success_rate():
     rate = round((applied / total) * 100, 1) if total else 0
 
     return {"total": total, "applied": applied, "failed": total - applied, "rate": rate}
-
-

@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from src.api.routes import chat, system, upload, memory, linkedin, transcribe
+from src.api.routes import chat, system, upload, memory, linkedin, transcribe, auth as auth_routes
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ app.include_router(upload.router)
 app.include_router(memory.router)
 app.include_router(linkedin.router)
 app.include_router(transcribe.router)
+app.include_router(auth_routes.router)
 
 
 @app.head("/health")

@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="DOOM" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     
@@ -898,6 +899,28 @@ const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const speakBtn = document.getElementById('speak-btn');
 
+
+window.onload = function () {
+  google.accounts.id.initialize({
+    client_id: "YOUR_GOOGLE_CLIENT_ID",
+    callback: handleGoogleSignIn,
+    auto_select: true,
+    itp_support: true
+  });
+  google.accounts.id.prompt();
+};
+
+async function handleGoogleSignIn(response) {
+  await fetch('/auth/google', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credential: response.credential })
+  });
+  // No UI change needed here — the cookie is now set, and future
+  // /chat-stream requests will automatically be treated as owner.
+}
+
+
 window._speakOutput = true;
 speakBtn.classList.add('active');
 speakBtn.textContent = '🔊';
@@ -905,6 +928,8 @@ speakBtn.textContent = '🔊';
 let audioQueue = [];
 let isPlaying = false;
 let currentAudio = null;
+
+
 
 function toggleSpeak() {
   window._speakOutput = !window._speakOutput;

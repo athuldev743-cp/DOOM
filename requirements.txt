@@ -32,3 +32,5 @@ playwright
 ddgs
 langfuse
 rich
+google-auth
+pyjwt
