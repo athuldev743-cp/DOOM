@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from src.agent.llm import chat
 from src.memory.manager import MemoryManager
 from src.tools.registry import get_tool, list_tools
+from src.tools.schemas import ToolResult
 from src.memory.profile import ProfileManager
 from src.memory.extractor import extract_and_save
 
@@ -218,6 +219,15 @@ class Agent:
         ]
         return "\n".join(clean).strip()
 
+    def _unwrap(self, result):
+        """Bridge for the in-progress Pydantic tool migration: converted
+        tools return a ToolResult, unconverted tools still return a plain
+        str. This makes both work through the same dispatch unchanged —
+        remove once every tool has been converted."""
+        if isinstance(result, ToolResult):
+            return result.to_wire()
+        return result
+
     async def _run_tool(self, tool_name: str, args: str) -> str:
      tool = get_tool(tool_name)
 
@@ -226,28 +236,28 @@ class Agent:
 
      try:
         if tool_name == "save_reminder":
-            return tool.run(title=args)
+            return self._unwrap(tool.run(title=args))
 
         elif tool_name == "web_search":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "automate":
-            return tool.run(command=args)
+            return self._unwrap(tool.run(command=args))
 
         elif tool_name == "search_docs":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "call_contact":
-            return tool.run(name=args)
+            return self._unwrap(tool.run(name=args))
 
         elif tool_name == "whatsapp_contact":
             parts = args.split("|")
             name = parts[0].strip()
             message = parts[1].strip() if len(parts) > 1 else ""
-            return tool.run(name=name, message=message)
+            return self._unwrap(tool.run(name=name, message=message))
 
         elif tool_name == "whatsapp_resume":
-            return tool.run(name=args.strip())
+            return self._unwrap(tool.run(name=args.strip()))
 
         elif tool_name == "add_contact":
             parts = args.split("|")
@@ -256,93 +266,93 @@ class Agent:
             relationship = parts[2].strip() if len(parts) > 2 else ""
             notes = parts[3].strip() if len(parts) > 3 else ""
 
-            return tool.run(
+            return self._unwrap(tool.run(
                 name=name,
                 phone=phone,
                 relationship=relationship,
                 notes=notes
-            )
+            ))
 
         elif tool_name == "set_profile":
             parts = args.split("|")
             key = parts[0].strip()
             value = parts[1].strip() if len(parts) > 1 else ""
-            return tool.run(key=key, value=value)
+            return self._unwrap(tool.run(key=key, value=value))
 
         elif tool_name == "get_profile":
-            return tool.run(key=args if args != "none" else "")
+            return self._unwrap(tool.run(key=args if args != "none" else ""))
 
         elif tool_name == "read_emails":
             count = int(args) if args and args.isdigit() else 5
-            return tool.run(count=count)
+            return self._unwrap(tool.run(count=count))
 
         elif tool_name == "send_email":
             parts = args.split("|")
             to = parts[0].strip()
             subject = parts[1].strip() if len(parts) > 1 else "Hello"
             body = parts[2].strip() if len(parts) > 2 else ""
-            return tool.run(to=to, subject=subject, body=body)
+            return self._unwrap(tool.run(to=to, subject=subject, body=body))
 
         elif tool_name == "send_resume_email":
-            return tool.run(to=args.strip())
+            return self._unwrap(tool.run(to=args.strip()))
 
         elif tool_name == "summarize_inbox":
-            return tool.run()
+            return self._unwrap(tool.run())
 
         elif tool_name == "job_search":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "score_jd":
-            return tool.run(jd=args)
+            return self._unwrap(tool.run(jd=args))
 
         elif tool_name == "cover_letter":
             parts = args.split("|")
             company = parts[0].strip() if parts else ""
             role = parts[1].strip() if len(parts) > 1 else ""
-            return tool.run(company=company, role=role)
+            return self._unwrap(tool.run(company=company, role=role))
 
         elif tool_name == "track_application":
             parts = args.split("|")
             company = parts[0].strip() if parts else ""
             role = parts[1].strip() if len(parts) > 1 else ""
             status = parts[2].strip() if len(parts) > 2 else "applied"
-            return tool.run(company=company, role=role, status=status)
+            return self._unwrap(tool.run(company=company, role=role, status=status))
 
         elif tool_name == "linkedin_profile":
-            return tool.run()
+            return self._unwrap(tool.run())
 
         elif tool_name == "linkedin_jobs":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "naukri_search":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "naukri_scrape":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "find_hr_email":
-            return tool.run(company=args)
+            return self._unwrap(tool.run(company=args))
 
         elif tool_name == "auto_apply":
             parts = args.split("|")
             company = parts[0].strip()
             role = parts[1].strip() if len(parts) > 1 else "Developer"
-            return tool.run(company=company, role=role)
+            return self._unwrap(tool.run(company=company, role=role))
 
         elif tool_name == "bulk_apply":
-            return tool.run(query=args)
+            return self._unwrap(tool.run(query=args))
 
         elif tool_name == "list_applications":
-            return tool.run()
+            return self._unwrap(tool.run())
 
         elif tool_name == "daily_briefing":
-            return tool.run()
+            return self._unwrap(tool.run())
 
         elif tool_name == "send_resume_email":
             parts = args.split("|")
             to = parts[0].strip()
             role = parts[1].strip() if len(parts) > 1 else ""
-            return tool.run(to=to, role=role)
+            return self._unwrap(tool.run(to=to, role=role))
     
 
         elif tool_name in [
@@ -352,22 +362,22 @@ class Agent:
             "ingest_docs",
             "get_datetime",
         ]:
-            return tool.run()
+            return self._unwrap(tool.run())
 
         elif tool_name == "whatsapp_api_send":
             parts = args.split("|")
             name = parts[0].strip()
             message = parts[1].strip() if len(parts) > 1 else ""
-            return tool.run(name=name, message=message)
+            return self._unwrap(tool.run(name=name, message=message))
 
         elif tool_name == "whatsapp_broadcast":
-            return tool.run(message=args)
+            return self._unwrap(tool.run(message=args))
 
         elif tool_name == "whatsapp_api_resume":
-            return tool.run(name=args.strip())
+            return self._unwrap(tool.run(name=args.strip()))
 
         else:
-            return tool.run()
+            return self._unwrap(tool.run())
 
      except Exception as e:
         return f"Tool error: {str(e)}"

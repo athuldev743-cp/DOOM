@@ -4,6 +4,10 @@ import requests
 from ddgs import DDGS
 from bs4 import BeautifulSoup
 from src.tools.base import BaseTool
+from src.tools.schemas import (
+    ToolResult, JobSearchArgs, CoverLetterArgs, ScoreJDArgs,
+    TrackApplicationArgs, ListApplicationsArgs,
+)
 from src.memory.profile import ProfileManager
 import re
 from src.tools.company_extract import extract_company
@@ -111,6 +115,12 @@ def get_locations(p: ProfileManager) -> list:
 class JobSearchTool(BaseTool):
     name = "job_search"
     description = "Search only real, previously-unseen job postings on Naukri, Wellfound, Indeed, LinkedIn"
+    args_schema = JobSearchArgs
+
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        # The LLM sends a plain query string, e.g. "backend developer Kochi"
+        return {"query": raw.strip()}
 
     BROKEN_MARKERS = [
         "we cannot provide a description",
@@ -225,7 +235,7 @@ class JobSearchTool(BaseTool):
             "auto_apply": JOB_PLATFORMS.get(platform, {}).get("auto_apply", False),
         }
 
-    def run(self, query: str = "", limit: int = 20) -> str:
+    def run(self, query: str = "", limit: int = 20) -> ToolResult:
         """Hybrid delivery: serves whatever's already in the pool (instant),
         then tops up with a LIVE search only for the shortfall if the pool
         has fewer than `limit` unsent jobs. Enforces a 24h cooldown between
@@ -242,9 +252,12 @@ class JobSearchTool(BaseTool):
                         remaining = timedelta(hours=24) - elapsed
                         hours_left = int(remaining.total_seconds() // 3600)
                         minutes_left = int((remaining.total_seconds() % 3600) // 60)
-                        return (
-                            f"You already got today's batch of jobs. Next batch available in "
-                            f"{hours_left}h {minutes_left}m — or check 'my applications' to review what's pending."
+                        return ToolResult(
+                            success=True,
+                            message=(
+                                f"You already got today's batch of jobs. Next batch available in "
+                                f"{hours_left}h {minutes_left}m — or check 'my applications' to review what's pending."
+                            ),
                         )
                 except Exception:
                     pass
@@ -345,7 +358,10 @@ class JobSearchTool(BaseTool):
                 db.commit()
 
                 if not jobs:
-                    return "No jobs found right now, even after a live top-up search — try again shortly."
+                    return ToolResult(
+                        success=False,
+                        message="No jobs found right now, even after a live top-up search — try again shortly.",
+                    )
 
                 for i, job in enumerate(jobs):
                     job["id"] = f"job_{i}"
@@ -360,9 +376,13 @@ class JobSearchTool(BaseTool):
                     plat = job["platform"]
                     platform_counts[plat] = platform_counts.get(plat, 0) + 1
 
-                result = "JOBS_DATA:" + json.dumps({"jobs": jobs, "platform_counts": platform_counts})
                 print(f"[JobSearch] Returning {len(jobs)} jobs")
-                return result
+                return ToolResult(
+                    success=True,
+                    message=f"Found {len(jobs)} jobs.",
+                    data={"jobs": jobs, "platform_counts": platform_counts},
+                    prefix="JOBS_DATA",
+                )
 
             except Exception:
                 db.rollback()
@@ -372,13 +392,14 @@ class JobSearchTool(BaseTool):
 
         except Exception as e:
             print(f"[JobSearch] ERROR: {e}")
-            return f"Job search error: {str(e)}"
+            return ToolResult(success=False, message=f"Job search error: {str(e)}")
 
 
 def apply_to_single_job(index: int) -> dict:
     """Manual platform apply — user clicks through to the real listing.
-    This is what marks the job applied and removes it from future searches.
-    Does NOT send email — that's a separate action via email_only_for_job."""
+    Called directly by the /api/apply-single-job route, NOT through the agent's
+    tool dispatch — so it's outside the args_schema/ToolResult refactor and
+    keeps returning a plain dict."""
     p = ProfileManager()
     latest = p.get("latest_job_search")
     if not latest:
@@ -407,7 +428,7 @@ def apply_to_single_job(index: int) -> dict:
 
 def email_only_for_job(index: int) -> dict:
     """Used by the 'Send Email' button — sends the resume email only.
-    Does NOT mark the job as applied, so the card stays in the list."""
+    Also called directly by a route, not through the agent's tool dispatch."""
     p = ProfileManager()
     latest = p.get("latest_job_search")
     if not latest:
@@ -431,8 +452,18 @@ def email_only_for_job(index: int) -> dict:
 class CoverLetterTool(BaseTool):
     name = "cover_letter"
     description = "Generate a highly tailored LLM-driven application email mapping projects to the full job description."
+    args_schema = CoverLetterArgs
 
-    def run(self, company: str = "", role: str = "", jd: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        # Today's format: "company | role" (jd is never sent via chat today)
+        parts = raw.split("|")
+        return {
+            "company": parts[0].strip() if parts else "",
+            "role": parts[1].strip() if len(parts) > 1 else "",
+        }
+
+    def run(self, company: str = "", role: str = "", jd: str = "") -> ToolResult:
         try:
             p = ProfileManager()
             name = p.get("name") or "Athul Dev"
@@ -480,11 +511,11 @@ Formatting & Style Instructions:
 """
                     response = model.generate_content(prompt)
                     if response and response.text:
-                        return response.text.strip()
+                        return ToolResult(success=True, message=response.text.strip())
             except Exception as llm_err:
                 print(f"[CoverLetterTool] LLM generation failed, switching to dynamic fallback: {llm_err}")
 
-            return f"""Dear Hiring Manager,
+            fallback = f"""Dear Hiring Manager,
 
 I am writing to express my strong interest in the {role if role else 'Full Stack AI Developer'} position at {company if company else 'your company'}.
 
@@ -500,16 +531,22 @@ Best regards,
 {name}
 📧 {email} | 📱 {phone}
 🌐 Portfolio: {portfolio} | 💻 GitHub: {github}"""
+            return ToolResult(success=True, message=fallback)
 
         except Exception as e:
-            return f"Cover letter generation error: {str(e)}"
+            return ToolResult(success=False, message=f"Cover letter generation error: {str(e)}")
 
 
 class ScoreJDTool(BaseTool):
     name = "score_jd"
     description = "Score a job description against Athul's resume and skills"
+    args_schema = ScoreJDArgs
 
-    def run(self, jd: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"jd": raw}
+
+    def run(self, jd: str = "") -> ToolResult:
         try:
             p = ProfileManager()
             skills = p.get("skills") or "React, Python, FastAPI, PostgreSQL, MongoDB, Docker, LLM"
@@ -520,16 +557,30 @@ class ScoreJDTool(BaseTool):
             missing = [s for s in skill_list if s not in jd_lower]
             score = int((len(matched) / len(skill_list)) * 100) if skill_list else 50
 
-            return f"📊 Match Score: {score}%\nMatched: {', '.join(matched)}\nMissing: {', '.join(missing)}"
+            return ToolResult(
+                success=True,
+                message=f"📊 Match Score: {score}%\nMatched: {', '.join(matched)}\nMissing: {', '.join(missing)}",
+                data={"score": score, "matched": matched, "missing": missing},
+            )
         except Exception as e:
-            return f"Score error: {str(e)}"
+            return ToolResult(success=False, message=f"Score error: {str(e)}")
 
 
 class TrackApplicationTool(BaseTool):
     name = "track_application"
     description = "Record applied job to persistent tracking memory."
+    args_schema = TrackApplicationArgs
 
-    def run(self, company: str = "", role: str = "", status: str = "applied") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|")
+        return {
+            "company": parts[0].strip() if parts else "",
+            "role": parts[1].strip() if len(parts) > 1 else "",
+            "status": parts[2].strip() if len(parts) > 2 else "applied",
+        }
+
+    def run(self, company: str = "", role: str = "", status: str = "applied") -> ToolResult:
         try:
             p = ProfileManager()
             history = p.get("application_history") or "[]"
@@ -544,26 +595,28 @@ class TrackApplicationTool(BaseTool):
                 "status": status
             })
             p.set("application_history", json.dumps(records))
-            return f"Recorded application for {role} at {company}."
+            return ToolResult(success=True, message=f"Recorded application for {role} at {company}.")
         except Exception as e:
-            return f"Tracking error: {str(e)}"
+            return ToolResult(success=False, message=f"Tracking error: {str(e)}")
 
 
 class ListApplicationsTool(BaseTool):
     name = "list_applications"
     description = "List all tracked job applications"
+    args_schema = ListApplicationsArgs
 
-    def run(self) -> str:
+    def run(self) -> ToolResult:
         try:
             p = ProfileManager()
             existing = p.get("application_history")
             if not existing:
-                return "No applications tracked yet."
+                return ToolResult(success=True, message="No applications tracked yet.")
             apps = json.loads(existing)
             if not apps:
-                return "No applications tracked yet."
-            return f"📋 Job Applications ({len(apps)} total):\n\n" + "\n".join(
+                return ToolResult(success=True, message="No applications tracked yet.")
+            listing = f"📋 Job Applications ({len(apps)} total):\n\n" + "\n".join(
                 [f"• {a.get('role')} at {a.get('company')} ({a.get('status')})" for a in apps]
             )
+            return ToolResult(success=True, message=listing, data={"applications": apps})
         except Exception as e:
-            return f"List error: {str(e)}"
+            return ToolResult(success=False, message=f"List error: {str(e)}")
