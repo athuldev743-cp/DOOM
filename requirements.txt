@@ -34,3 +34,4 @@ langfuse
 rich
 google-auth
 pyjwt
+pyautogui
