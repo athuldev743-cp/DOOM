@@ -110,8 +110,10 @@ def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week", count
             return None
 
         payload = resp.json() or {}
-        raw_jobs = payload.get("data", []) or []
-        print(f"[JSearch] Raw response keys: {list(payload.keys())} | {len(raw_jobs)} jobs in 'data'")
+        data_block = payload.get("data") or {}
+        raw_jobs = data_block.get("jobs", []) or []
+        next_cursor = data_block.get("cursor")
+        print(f"[JSearch] {len(raw_jobs)} jobs returned | cursor present: {next_cursor is not None}")
 
         normalized = []
         for job in raw_jobs:
