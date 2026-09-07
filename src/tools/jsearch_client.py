@@ -69,7 +69,7 @@ def get_usage() -> dict:
     return {"used": used, "cap": MONTHLY_CALL_CAP, "remaining": max(0, MONTHLY_CALL_CAP - used)}
 
 
-def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week", country: str = "in") -> Optional[list]:
+def search_jobs(query: str, num_pages: int = 1, date_posted: str = "all", country: str = "in") -> Optional[list]:
     """Calls JSearch's /search-v2 endpoint. Returns normalized job dicts, or
     None if the key is missing, quota guard trips, or the call fails.
 
