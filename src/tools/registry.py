@@ -5,7 +5,7 @@ from src.tools.automation import AutomationTool
 from src.tools.rag_tool import RAGSearchTool, IngestDocsTool, ListDocsTool
 from src.tools.briefing_tool import DailyBriefingTool
 from src.tools.auto_apply_tool import FindHREmailTool, AutoApplyTool, BulkApplyTool
-from src.tools.whatsapp_api_tool import WhatsAppSendTool, WhatsAppBroadcastTool, WhatsAppResumeTool
+
 
 from src.tools.contacts_tool import (
     CallContactTool, WhatsAppContactTool, WhatsAppResumeTool,
@@ -55,9 +55,8 @@ TOOLS = {
     "auto_apply": AutoApplyTool(),
     "bulk_apply": BulkApplyTool(),
     "send_email_resume": SendEmailWithResumeTool(),
-    "whatsapp_api_send": WhatsAppSendTool(),
-    "whatsapp_broadcast": WhatsAppBroadcastTool(),
-    "whatsapp_api_resume": WhatsAppResumeTool(),
+   
+    
 }
 
 
