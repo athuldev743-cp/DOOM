@@ -1,17 +1,12 @@
 import os
 import json
-import requests
-from ddgs import DDGS
-from bs4 import BeautifulSoup
 from src.tools.base import BaseTool
 from src.tools.schemas import (
     ToolResult, JobSearchArgs, CoverLetterArgs, ScoreJDArgs,
     TrackApplicationArgs, ListApplicationsArgs,
 )
+from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.memory.profile import ProfileManager
-import re
-from src.tools.company_extract import extract_company
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl
@@ -48,61 +43,18 @@ def _is_already_applied(company: str, title: str, applied_keys: set) -> bool:
     return False
 
 
+# Kept for backward compatibility — auto_apply_tool.py or other files may
+# still reference these platform names / the auto_apply flag by platform.
 JOB_PLATFORMS = {
     "naukri": {"domain": "naukri.com", "auto_apply": True},
     "wellfound": {"domain": "wellfound.com", "auto_apply": True},
     "indeed": {"domain": "indeed.com", "auto_apply": False},
     "linkedin": {"domain": "linkedin.com", "auto_apply": False},
+    "glassdoor": {"domain": "glassdoor.com", "auto_apply": False},
+    "ziprecruiter": {"domain": "ziprecruiter.com", "auto_apply": False},
+    "monster": {"domain": "monster.com", "auto_apply": False},
+    "web": {"domain": "", "auto_apply": False},
 }
-
-
-def detect_platform(url: str) -> str:
-    url = (url or "").lower()
-    for platform, info in JOB_PLATFORMS.items():
-        if info["domain"] in url:
-            return platform
-    return "web"
-
-
-def is_real_listing_url(url: str, platform: str) -> bool:
-    """Excludes category/landing/marketing pages that match a site: search
-    but aren't an actual individual job posting."""
-    url = (url or "").lower()
-
-    if platform == "wellfound":
-        return bool(re.search(r'wellfound\.com/jobs/(\d+)', url))
-    if platform == "naukri":
-        return bool(re.search(r'-\d{6,}$', url.split('?')[0]))
-    if platform == "indeed":
-        return any(marker in url for marker in ["/rc/clk", "/viewjob", "jk="])
-    if platform == "linkedin":
-        return bool(re.search(r'linkedin\.com/jobs/view/[\w-]*\d{6,}', url))
-
-
-def extract_jsonld_jobposting(html: str) -> dict:
-    """Parse Schema.org JobPosting structured data — the source these sites
-    embed for Google's job search, and far more reliable than title-string
-    parsing when present. Returns {} if no structured data found."""
-    try:
-        soup = BeautifulSoup(html, "html.parser")
-        for script in soup.find_all("script", type="application/ld+json"):
-            try:
-                data = json.loads(script.string or "{}")
-                candidates = data if isinstance(data, list) else [data]
-                for item in candidates:
-                    if item.get("@type") == "JobPosting":
-                        org = item.get("hiringOrganization", {})
-                        company = org.get("name") if isinstance(org, dict) else None
-                        role_title = item.get("title")
-                        return {
-                            "company": (company or "").strip(),
-                            "title": (role_title or "").strip(),
-                        }
-            except Exception:
-                continue
-    except Exception:
-        pass
-    return {}
 
 
 def get_locations(p: ProfileManager) -> list:
@@ -114,132 +66,18 @@ def get_locations(p: ProfileManager) -> list:
 
 class JobSearchTool(BaseTool):
     name = "job_search"
-    description = "Search only real, previously-unseen job postings on Naukri, Wellfound, Indeed, LinkedIn"
+    description = "Search real, previously-unseen job postings via JSearch (LinkedIn, Indeed, Naukri, Glassdoor, and more)."
     args_schema = JobSearchArgs
 
     @classmethod
     def parse_args(cls, raw: str) -> dict:
-        # The LLM sends a plain query string, e.g. "backend developer Kochi"
         return {"query": raw.strip()}
-
-    BROKEN_MARKERS = [
-        "we cannot provide a description",
-        "you don't have permission to access",
-        "reference #",
-        "the site owner hides",
-    ]
-    NO_FETCH_PLATFORMS = {"naukri", "indeed"}
-
-    def _fetch_page(self, url: str) -> dict:
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
-            res = requests.get(url, headers=headers, timeout=5)
-            if res.status_code != 200:
-                return {"description": "", "jsonld": {}}
-            raw_html = res.text
-            jsonld = extract_jsonld_jobposting(raw_html)
-            soup = BeautifulSoup(raw_html, "html.parser")
-            for element in soup(["script", "style", "nav", "header", "footer", "form"]):
-                element.decompose()
-            text = " ".join(soup.stripped_strings)
-            return {"description": text[:2500], "jsonld": jsonld}
-        except Exception:
-            return {"description": "", "jsonld": {}}
-
-    def _collect_candidates(self, searches, applied_keys) -> list:
-        """Phase 1: run all DDG searches, apply cheap filters (no network fetch yet).
-        Returns a list of candidate dicts still needing a page fetch (or already resolved
-        for NO_FETCH_PLATFORMS)."""
-        from collections import defaultdict
-        rejected = defaultdict(int)
-        seen_urls = set()
-        candidates = []
-
-        with DDGS() as ddgs:
-            for search_query, expected_platform in searches:
-                try:
-                    raw_results = list(ddgs.text(search_query, max_results=15))
-                    print(f"[JobSearch] '{search_query}' -> {len(raw_results)} raw DDG results")
-                    for r in raw_results:
-                        url = r.get('href', '')
-                        title = r.get('title', '')
-                        body = r.get('body', '')
-
-                        if not url or url in seen_urls:
-                            continue
-                        seen_urls.add(url)
-
-                        platform = detect_platform(url)
-                        if platform != expected_platform:
-                            rejected["platform_mismatch"] += 1
-                            print(f"[DEBUG mismatch] expected={expected_platform} got={platform} url={url}")
-                            continue
-
-                        if not is_real_listing_url(url, platform):
-                            rejected["not_real_url"] += 1
-                            print(f"[DEBUG not_real_url] platform={platform} url={url}")
-                            continue
-
-                        candidates.append({
-                            "url": url, "title": title, "body": body, "platform": platform,
-                        })
-                except Exception as e:
-                    print(f"[JobSearch] search failed for '{search_query}': {e}")
-                    continue
-
-        self._rejected = rejected
-        return candidates
-
-    def _resolve_candidate(self, c: dict, applied_keys):
-        """Phase 2 per-candidate: does the (possibly concurrent) page fetch and
-        applies the remaining filters. Returns a finished job dict, or None if rejected."""
-        url, title, body, platform = c["url"], c["title"], c["body"], c["platform"]
-
-        if platform in self.NO_FETCH_PLATFORMS:
-            jsonld = {}
-            description = body
-        else:
-            page_data = self._fetch_page(url)
-            jsonld = page_data["jsonld"]
-            description = page_data["description"] if len(page_data["description"]) > 200 else body
-
-        company = jsonld.get("company") or extract_company(title, platform)
-        final_title = jsonld.get("title") or title
-
-        if not company:
-            self._rejected["no_company"] += 1
-            return None
-
-        if final_title.lower().count(" at ") >= 2:
-            self._rejected["duplicate_title"] += 1
-            return None
-
-        if _is_already_applied(company, final_title, applied_keys):
-            self._rejected["already_applied"] += 1
-            return None
-
-        desc_lower = description.lower()
-        if any(marker in desc_lower for marker in self.BROKEN_MARKERS):
-            self._rejected["broken_page"] += 1
-            return None
-
-        return {
-            "title": final_title,
-            "company": company,
-            "snippet": body,
-            "description": description,
-            "url": url,
-            "platform": platform,
-            "auto_apply": JOB_PLATFORMS.get(platform, {}).get("auto_apply", False),
-        }
 
     def run(self, query: str = "", limit: int = 20) -> ToolResult:
         """Hybrid delivery: serves whatever's already in the pool (instant),
-        then tops up with a LIVE search only for the shortfall if the pool
-        has fewer than `limit` unsent jobs. Enforces a 24h cooldown between
-        full deliveries.
+        then tops up with a LIVE JSearch call only for the shortfall if the
+        pool has fewer than `limit` unsent jobs. Enforces a 24h cooldown
+        between full deliveries.
         """
         try:
             p_check = ProfileManager()
@@ -294,52 +132,31 @@ class JobSearchTool(BaseTool):
                     p = ProfileManager()
                     applied_keys = _load_applied_keys(p)
                     locations = get_locations(p)
+                    location = locations[0] if locations else "Kochi Kerala"
 
-                    target_roles = (
-                        query.strip() if query and query.strip()
-                        else (p.get("target_roles") or "AI engineer software engineer backend fullstack developer")
-                    )
+                    search_query = query.strip() if query and query.strip() else build_combined_query(location)
 
-                    searches = []
-                    for location in locations[:1]:
-                        searches.extend([
-                            (f'site:naukri.com/job-listings "{target_roles}" {location}', "naukri"),
-                            (f'site:wellfound.com/jobs "{target_roles}"', "wellfound"),
-                            (f'site:indeed.com "{target_roles}" {location}', "indeed"),
-                            (f'site:linkedin.com/jobs/view "{target_roles}" {location}', "linkedin"),
-                        ])
+                    live_jobs = search_jobs(search_query, num_pages=1) or []
 
-                    candidates = self._collect_candidates(searches, applied_keys)
-
-                    candidate_urls = [c["url"] for c in candidates if c.get("url")]
-                    if candidate_urls:
+                    live_urls = [j["url"] for j in live_jobs]
+                    already_seen = set()
+                    if live_urls:
                         already_seen = {
-                            row.url for row in db.query(SeenUrl.url).filter(SeenUrl.url.in_(candidate_urls)).all()
+                            row.url for row in db.query(SeenUrl.url).filter(SeenUrl.url.in_(live_urls)).all()
                         }
-                    else:
-                        already_seen = set()
-                    candidates = [c for c in candidates if c.get("url") not in already_seen]
 
                     resolved = []
-                    with ThreadPoolExecutor(max_workers=8) as executor:
-                        futures = {
-                            executor.submit(self._resolve_candidate, c, applied_keys): c for c in candidates
-                        }
-                        for future in as_completed(futures):
-                            try:
-                                result = future.result()
-                                if result:
-                                    resolved.append(result)
-                                if len(resolved) >= shortfall:
-                                    break
-                            except Exception as e:
-                                print(f"[JobSearch] Candidate resolution failed: {e}")
-                                continue
+                    for job in live_jobs:
+                        if job["url"] in already_seen:
+                            continue
+                        if _is_already_applied(job["company"], job["title"], applied_keys):
+                            continue
+                        resolved.append(job)
+                        if len(resolved) >= shortfall:
+                            break
 
-                    top_up = resolved[:shortfall]
                     now = datetime.utcnow()
-
-                    for job in top_up:
+                    for job in resolved:
                         db.add(SeenUrl(url=job["url"], first_seen=now))
                         db.add(DailyJobMatch(
                             url=job["url"], title=job["title"], company=job["company"],
@@ -348,12 +165,12 @@ class JobSearchTool(BaseTool):
                         ))
                         jobs.append({
                             "title": job["title"], "company": job["company"],
-                            "snippet": job["description"][:200], "description": job["description"],
+                            "snippet": job["snippet"], "description": job["description"],
                             "url": job["url"], "platform": job["platform"],
                             "auto_apply": job["auto_apply"], "score": 0,
                         })
 
-                    print(f"[JobSearch] Top-up added {len(top_up)} live-found jobs")
+                    print(f"[JobSearch] Top-up added {len(resolved)} live-found jobs")
 
                 db.commit()
 
@@ -446,7 +263,7 @@ def email_only_for_job(index: int) -> dict:
         job_index=index + 1,
         track=False,
     )
-    return {"success": "✅" in result, "message": result}
+    return {"success": result.success, "message": result.message}
 
 
 class CoverLetterTool(BaseTool):
@@ -456,7 +273,6 @@ class CoverLetterTool(BaseTool):
 
     @classmethod
     def parse_args(cls, raw: str) -> dict:
-        # Today's format: "company | role" (jd is never sent via chat today)
         parts = raw.split("|")
         return {
             "company": parts[0].strip() if parts else "",

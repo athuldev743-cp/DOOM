@@ -1,12 +1,14 @@
 from src.tools.base import BaseTool
+from src.tools.schemas import ToolResult, DailyBriefingArgs
 from src.memory.profile import ProfileManager
 from datetime import datetime
 
 class DailyBriefingTool(BaseTool):
     name = "daily_briefing"
     description = "Generate Athul's personalized morning briefing"
+    args_schema = DailyBriefingArgs
 
-    def run(self) -> str:
+    def run(self) -> ToolResult:
         try:
             p = ProfileManager()
             now = datetime.now()
@@ -30,9 +32,10 @@ class DailyBriefingTool(BaseTool):
             try:
                 from src.tools.registry import get_tool
                 reminder_tool = get_tool('list_reminders')
-                reminders = reminder_tool.run()
-                if 'No reminders' not in reminders:
-                    briefing += f"⏰ REMINDERS:\n{reminders}\n"
+                reminders_result = reminder_tool.run()
+                reminders_text = reminders_result.message  # list_reminders returns ToolResult now
+                if 'No reminders' not in reminders_text:
+                    briefing += f"⏰ REMINDERS:\n{reminders_text}\n"
             except:
                 pass
 
@@ -66,7 +69,7 @@ class DailyBriefingTool(BaseTool):
             tip = tips[now.weekday() % len(tips)]
             briefing += f"💡 TODAY: {tip}"
 
-            return briefing
+            return ToolResult(success=True, message=briefing)
 
         except Exception as e:
-            return f"Briefing error: {str(e)}"
+            return ToolResult(success=False, message=f"Briefing error: {str(e)}")

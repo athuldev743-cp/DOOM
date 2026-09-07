@@ -1,30 +1,17 @@
-import os
 import sys
-import time
 from pathlib import Path
 from datetime import datetime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ddgs import DDGS
 from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, init_db
 from src.memory.profile import ProfileManager
-from src.tools.jobs_tool import (
-    JobSearchTool, detect_platform, is_real_listing_url,
-    extract_jsonld_jobposting, JOB_PLATFORMS,
-    _load_applied_keys, _is_already_applied,
-)
-from src.tools.company_extract import extract_company
+from src.tools.jobs_tool import _load_applied_keys, _is_already_applied, get_locations
+from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.tools.job_scoring import score_job
-from src.tools.jobs_tool import get_locations
 
-ROLE_QUERIES = [
-    "AI Engineer", "Software Engineer", "AI Architect",
-    "Backend Developer", "Full Stack Developer",
-]
 MAX_POOL_SIZE = 20  # keep the rolling pool capped — trim lowest-scored when exceeded
-
 
 
 def run_scan():
@@ -33,10 +20,10 @@ def run_scan():
     p = ProfileManager()
     locations = get_locations(p)
     applied_keys = _load_applied_keys(p)
-    tool = JobSearchTool()
 
-    # Rotate through locations by hour-of-day, so 7 locations still get
-    # full coverage across 24 hourly runs without multiplying query volume
+    # Rotate through locations by hour-of-day, same as before — but now it's
+    # ONE JSearch call per run instead of 20 DDG queries, to stay inside the
+    # 200 requests/month free tier.
     current_location = locations[datetime.utcnow().hour % len(locations)]
     print(f"[Scan] This hour's location: {current_location}")
 
@@ -44,71 +31,32 @@ def run_scan():
     new_count = 0
 
     try:
-        with DDGS() as ddgs:
-            for role in ROLE_QUERIES:
-                platform_queries = [
-                    (f'site:naukri.com/job-listings "{role}" {current_location}', "naukri"),
-                    (f'site:indeed.com "{role}" {current_location}', "indeed"),
-                    (f'site:linkedin.com/jobs/view "{role}" {current_location}', "linkedin"),
-                    (f'site:wellfound.com/jobs "{role}"', "wellfound"),
-                ]
+        query = build_combined_query(current_location)
+        live_jobs = search_jobs(query, num_pages=1) or []
+        print(f"[Scan] JSearch returned {len(live_jobs)} jobs for '{query}'")
 
-               
+        now = datetime.utcnow()
+        for job in live_jobs:
+            url = job["url"]
+            if not url or url in existing_urls:
+                continue
+            existing_urls.add(url)
 
-                for query, expected_platform in platform_queries:
-                    try:
-                        time.sleep(1.5)  # pace requests, avoid DDG throttling
-                        results = list(ddgs.text(query, max_results=10))
-                        print(f"[Scan] '{query}' -> {len(results)} raw results")
+            company = job["company"]
+            title = job["title"]
+            description = job["description"]
 
-                        for r in results:
-                            url = r.get("href", "")
-                            title = r.get("title", "")
-                            body = r.get("body", "")
+            if _is_already_applied(company, title, applied_keys):
+                continue
 
-                            if not url or url in existing_urls:
-                                continue
-                            existing_urls.add(url)
-
-                            platform = detect_platform(url)
-                            if platform != expected_platform:
-                                continue
-                            if not is_real_listing_url(url, platform):
-                                continue
-
-                            if platform in JobSearchTool.NO_FETCH_PLATFORMS:
-                                jsonld = {}
-                                description = body
-                            else:
-                                page_data = tool._fetch_page(url)
-                                jsonld = page_data["jsonld"]
-                                description = page_data["description"] if len(page_data["description"]) > 200 else body
-
-                            company = jsonld.get("company") or extract_company(title, platform)
-                            final_title = jsonld.get("title") or title
-
-                            if not company:
-                                continue
-                            if final_title.lower().count(" at ") >= 2:
-                                continue
-                            if _is_already_applied(company, final_title, applied_keys):
-                                continue
-
-                            desc_lower = description.lower()
-                            if any(m in desc_lower for m in JobSearchTool.BROKEN_MARKERS):
-                                continue
-
-                            db.add(SeenUrl(url=url))
-                            db.add(DailyJobMatch(
-                                url=url, title=final_title, company=company,
-                                description=description, source=platform,
-                                score=score_job(final_title, description),
-                                sent=False, applied=False,
-                            ))
-                            new_count += 1
-
-                    except Exception as e:
-                        print(f"[Scan Error] '{query}': {e}")
+            db.add(SeenUrl(url=url, first_seen=now))
+            db.add(DailyJobMatch(
+                url=url, title=title, company=company,
+                description=description, source=job["platform"],
+                score=score_job(title, description),
+                sent=False, applied=False,
+            ))
+            new_count += 1
 
         db.commit()
         print(f"[Scan] Done. {new_count} new matches added.")

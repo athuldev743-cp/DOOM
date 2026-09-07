@@ -6,6 +6,7 @@ import requests
 from typing import List, Tuple, Optional
 
 from src.tools.base import BaseTool
+from src.tools.schemas import ToolResult, FindHREmailArgs, AutoApplyArgs, BulkApplyArgs
 from src.memory.profile import ProfileManager
 from src.tools.email_tool import get_gmail_service
 from src.tools.email_verifier import domain_has_mx
@@ -108,6 +109,11 @@ def get_resume_for_role(role: str, jd_text: str = "") -> Tuple[str, str]:
 class FindHREmailTool(BaseTool):
     name = "find_hr_email"
     description = "Find HR or recruiter email for a company, falling back to a real published contact email (checked against the company's own domain) before ever guessing"
+    args_schema = FindHREmailArgs
+
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"company": raw.strip()}
 
     HR_KEYWORDS = ["hr", "recruit", "career", "job", "talent", "hire", "people"]
 
@@ -313,11 +319,11 @@ class FindHREmailTool(BaseTool):
 
         return all_found[0]
 
-    def run(self, company: str = "") -> str:
+    def run(self, company: str = "") -> ToolResult:
         try:
             company = (company or "").strip()
             if not company:
-                return "Find email error: company name is required."
+                return ToolResult(success=False, message="Find email error: company name is required.")
 
             client_id = os.getenv("SNOV_CLIENT_ID")
             client_secret = os.getenv("SNOV_CLIENT_SECRET")
@@ -332,7 +338,10 @@ class FindHREmailTool(BaseTool):
                             if emails:
                                 verified, unverified = self._rank_emails(emails)
                                 if verified or unverified:
-                                    return self._format_email_result(company, verified, unverified)
+                                    return ToolResult(
+                                        success=True,
+                                        message=self._format_email_result(company, verified, unverified),
+                                    )
                 except (requests.RequestException, ValueError):
                     pass
 
@@ -341,13 +350,16 @@ class FindHREmailTool(BaseTool):
                 if fallback_emails:
                     result = f"Emails for {company}:\n⚠️ UNVERIFIED (web extracted):\n"
                     result += "\n".join(f"• {email}" for email in fallback_emails[:3])
-                    return result
+                    return ToolResult(success=True, message=result)
             except Exception:
                 pass
 
             general_email = self._find_general_contact_email(company)
             if general_email and domain_has_mx(general_email.split("@")[-1]):
-                return f"Emails for {company}:\n⚠️ GENERAL CONTACT (not HR-specific, but real, on-domain, and found):\n• {general_email}"
+                return ToolResult(
+                    success=True,
+                    message=f"Emails for {company}:\n⚠️ GENERAL CONTACT (not HR-specific, but real, on-domain, and found):\n• {general_email}",
+                )
 
             domain = guess_company_domain(company)
             if domain:
@@ -356,23 +368,38 @@ class FindHREmailTool(BaseTool):
                 working_domain = next((d for d in candidate_domains if domain_has_mx(d)), None)
 
                 if working_domain:
-                    return (
-                        f"⚠️ No directory match for {company}, but {working_domain} is a live mail domain.\n"
-                        f"Best-guess addresses (unverified mailbox — may still bounce):\n"
-                        f"• hr@{working_domain}\n• careers@{working_domain}\n• recruit@{working_domain}"
+                    return ToolResult(
+                        success=True,
+                        message=(
+                            f"⚠️ No directory match for {company}, but {working_domain} is a live mail domain.\n"
+                            f"Best-guess addresses (unverified mailbox — may still bounce):\n"
+                            f"• hr@{working_domain}\n• careers@{working_domain}\n• recruit@{working_domain}"
+                        ),
                     )
 
-            return f"❌ Could not find or guess a working email domain for {company}. Try a more specific company name or check LinkedIn manually."
+            return ToolResult(
+                success=False,
+                message=f"❌ Could not find or guess a working email domain for {company}. Try a more specific company name or check LinkedIn manually.",
+            )
 
         except Exception as e:
-            return f"Find email error: {str(e)}"
+            return ToolResult(success=False, message=f"Find email error: {str(e)}")
 
 
 class AutoApplyTool(BaseTool):
     name = "auto_apply"
     description = "Auto-apply to a job by finding HR email, extracting stored JD context, generating a cover letter, and sending email with resume attached."
+    args_schema = AutoApplyArgs
 
     REQUIRE_VERIFIED_EMAIL = False
+
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|")
+        return {
+            "company": parts[0].strip() if parts else "",
+            "role": parts[1].strip() if len(parts) > 1 else "Developer",
+        }
 
     def _pick_best_email(self, email_result: str):
         verified_emails = extract_verified_emails_from_result(email_result)
@@ -382,7 +409,7 @@ class AutoApplyTool(BaseTool):
             return valid_candidates[0]
         return None
 
-    def run(self, company: str = "", role: str = "", job_index: int = None, track: bool = True, jd: str = "") -> str:
+    def run(self, company: str = "", role: str = "", job_index: int = None, track: bool = True, jd: str = "") -> ToolResult:
         try:
             company = (company or "").strip()
             role = (role or "").strip()
@@ -414,25 +441,30 @@ class AutoApplyTool(BaseTool):
                         print(f"[AutoApply] Memory parse error: {parse_err}")
 
             if not company:
-                return "Auto apply error: company name or valid job selection is required."
+                return ToolResult(success=False, message="Auto apply error: company name or valid job selection is required.")
             if not role:
                 role = "Full Stack AI Developer"
 
             print(f"[AutoApply] Locating HR contact for {company}...")
-            email_result = FindHREmailTool().run(company)
-            hr_email = self._pick_best_email(email_result)
+            email_lookup = FindHREmailTool().run(company)
+            email_result_text = email_lookup.message
+            hr_email = self._pick_best_email(email_result_text)
 
             if not hr_email:
-                return f"❌ No email with a valid, existing domain found for {company} — skipping to avoid a guaranteed bounce. Raw lookup result:\n{email_result}"
+                return ToolResult(
+                    success=False,
+                    message=f"❌ No email with a valid, existing domain found for {company} — skipping to avoid a guaranteed bounce. Raw lookup result:\n{email_result_text}",
+                )
 
             print(f"[AutoApply] Target HR Email: {hr_email}")
 
             resume_path, resume_label = get_resume_for_role(role, jd_text)
             if not os.path.exists(resume_path):
-                    return f"Auto apply error: master resume file not found at path: {resume_path}"
+                return ToolResult(success=False, message=f"Auto apply error: master resume file not found at path: {resume_path}")
 
             from src.tools.jobs_tool import CoverLetterTool, TrackApplicationTool
-            cover_letter = CoverLetterTool().run(company=company, role=role, jd=jd_text)
+            cover_letter_result = CoverLetterTool().run(company=company, role=role, jd=jd_text)
+            cover_letter = cover_letter_result.message
 
             name = p.get("name") or "Athul Dev"
             subject = f"Application for {role} — {name}"
@@ -445,7 +477,7 @@ class AutoApplyTool(BaseTool):
                 role=role,
             )
 
-            send_failed = "❌" in send_result or "error" in send_result.lower()
+            send_failed = not send_result.success
             if track:
                 TrackApplicationTool().run(
                     company=company, role=role,
@@ -453,37 +485,48 @@ class AutoApplyTool(BaseTool):
                 )
 
             if send_failed:
-                return (
-                    f"❌ Application to {company} failed during dispatch.\n"
-                    f"👤 Position: {role}\n"
-                    f"📧 Attempted: {hr_email}\n"
-                    f"📨 Result: {send_result}"
+                return ToolResult(
+                    success=False,
+                    message=(
+                        f"❌ Application to {company} failed during dispatch.\n"
+                        f"👤 Position: {role}\n"
+                        f"📧 Attempted: {hr_email}\n"
+                        f"📨 Result: {send_result.message}"
+                    ),
                 )
 
-            return (
-                f"✅ Application successfully dispatched to {company}.\n"
-                f"👤 Position: {role}\n"
-                f"📧 Sent to: {hr_email}\n"
-                f"📄 Resume: {resume_label} ({resume_path})\n"
-                f"📋 Status: Application tracked in database.\n"
-                f"📨 Dispatch Result: {send_result}"
+            return ToolResult(
+                success=True,
+                message=(
+                    f"✅ Application successfully dispatched to {company}.\n"
+                    f"👤 Position: {role}\n"
+                    f"📧 Sent to: {hr_email}\n"
+                    f"📄 Resume: {resume_label} ({resume_path})\n"
+                    f"📋 Status: Application tracked in database.\n"
+                    f"📨 Dispatch Result: {send_result.message}"
+                ),
             )
 
         except Exception as e:
-            return f"Auto apply error: {str(e)}"
+            return ToolResult(success=False, message=f"Auto apply error: {str(e)}")
 
 
 class BulkApplyTool(BaseTool):
     name = "bulk_apply"
     description = "Apply to all jobs found in the recent search results"
+    args_schema = BulkApplyArgs
 
-    def run(self, query: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"query": raw.strip()}
+
+    def run(self, query: str = "") -> ToolResult:
         try:
             p = ProfileManager()
             latest_jobs = p.get("latest_job_search")
 
             if not latest_jobs:
-                return "No recent job search found. Please search for jobs first."
+                return ToolResult(success=False, message="No recent job search found. Please search for jobs first.")
 
             jobs = json.loads(latest_jobs)
             auto_apply = AutoApplyTool()
@@ -495,15 +538,23 @@ class BulkApplyTool(BaseTool):
                 role = job.get("title", "Developer")
 
                 result = auto_apply.run(company=company, role=role, job_index=idx)
-                if "❌" in result or "error" in result.lower():
-                    report += f"⏭️ Job #{idx} ({company}): Skipped — {result}\n"
+                if not result.success:
+                    report += f"⏭️ Job #{idx} ({company}): Skipped — {result.message}\n"
                     skipped += 1
                 else:
                     report += f"✅ Job #{idx} ({company}): Application dispatched!\n"
                     applied += 1
 
             report += f"\n📊 Summary: {applied} sent, {skipped} skipped"
-            return report
+
+            # The frontend already has a special case for "APPLY_REPORT:" prefixed
+            # responses (bypasses LLM reformatting, renders with line breaks directly)
+            # but nothing was ever emitting it — this now actually wires it up.
+            return ToolResult(
+                success=True,
+                message=report,
+                raw=f"APPLY_REPORT:{report}",
+            )
 
         except Exception as e:
-            return f"Bulk apply error: {str(e)}"
+            return ToolResult(success=False, message=f"Bulk apply error: {str(e)}")

@@ -13,6 +13,10 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 from src.tools.base import BaseTool
+from src.tools.schemas import (
+    ToolResult, ReadEmailsArgs, SendEmailArgs,
+    SendEmailWithResumeArgs, SendResumeEmailArgs, SummarizeInboxArgs,
+)
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
@@ -136,8 +140,14 @@ def get_gmail_service():
 class ReadEmailsTool(BaseTool):
     name = "read_emails"
     description = "Read latest unread emails from Gmail"
+    args_schema = ReadEmailsArgs
 
-    def run(self, count: int = 5) -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        raw = (raw or "").strip()
+        return {"count": int(raw) if raw.isdigit() else 5}
+
+    def run(self, count: int = 5) -> ToolResult:
         try:
             service = get_gmail_service()
             results = service.users().messages().list(
@@ -145,7 +155,7 @@ class ReadEmailsTool(BaseTool):
             ).execute()
             messages = results.get('messages', [])
             if not messages:
-                return "No unread emails."
+                return ToolResult(success=True, message="No unread emails.")
             emails = []
             for msg in messages[:count]:
                 m = service.users().messages().get(
@@ -159,16 +169,29 @@ class ReadEmailsTool(BaseTool):
                     f"Subject: {headers.get('Subject', 'No subject')}\n"
                     f"Preview: {snippet}"
                 )
-            return f"You have {len(messages)} unread emails:\n\n" + "\n\n---\n\n".join(emails)
+            return ToolResult(
+                success=True,
+                message=f"You have {len(messages)} unread emails:\n\n" + "\n\n---\n\n".join(emails),
+            )
         except Exception as e:
-            return f"Email error: {str(e)}"
+            return ToolResult(success=False, message=f"Email error: {str(e)}")
 
 
 class SendEmailTool(BaseTool):
     name = "send_email"
     description = "Send an email via Gmail"
+    args_schema = SendEmailArgs
 
-    def run(self, to: str = "", subject: str = "", body: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|")
+        return {
+            "to": parts[0].strip() if parts else "",
+            "subject": parts[1].strip() if len(parts) > 1 else "Hello",
+            "body": parts[2].strip() if len(parts) > 2 else "",
+        }
+
+    def run(self, to: str = "", subject: str = "", body: str = "") -> ToolResult:
         clean_to = sanitize_email(to)
         try:
             service = get_gmail_service()
@@ -179,7 +202,7 @@ class SendEmailTool(BaseTool):
                 if contact and contact.email:
                     clean_to = sanitize_email(contact.email)
                 else:
-                    return f"No email found for {to}."
+                    return ToolResult(success=False, message=f"No email found for {to}.")
 
             msg = MIMEMultipart()
             msg['To'] = clean_to
@@ -191,16 +214,30 @@ class SendEmailTool(BaseTool):
             service.users().messages().send(
                 userId='me', body={'raw': raw}
             ).execute()
-            return f"✓ Email sent to {clean_to}"
+            return ToolResult(success=True, message=f"✓ Email sent to {clean_to}")
         except Exception as e:
-            return f"Send error: {str(e)}"
+            return ToolResult(success=False, message=f"Send error: {str(e)}")
 
 
 class SendEmailWithResumeTool(BaseTool):
     name = "send_email_resume"
     description = "Send email with correct resume attached based on role"
+    args_schema = SendEmailWithResumeArgs
 
-    def run(self, *args, **kwargs) -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        # Not currently reachable via chat's TOOL:/ARGS: dispatch (core.py has
+        # no explicit branch for "send_email_resume" — this tool is invoked
+        # programmatically by AutoApplyTool). Defined for consistency/future use.
+        parts = raw.split("|")
+        return {
+            "to": parts[0].strip() if parts else "",
+            "subject": parts[1].strip() if len(parts) > 1 else "",
+            "body": parts[2].strip() if len(parts) > 2 else "",
+            "role": parts[3].strip() if len(parts) > 3 else "",
+        }
+
+    def run(self, *args, **kwargs) -> ToolResult:
         to = kwargs.get("to") or (args[0] if len(args) > 0 else "")
         subject = kwargs.get("subject") or (args[1] if len(args) > 1 else "")
         body = kwargs.get("body") or (args[2] if len(args) > 2 else "")
@@ -221,7 +258,7 @@ class SendEmailWithResumeTool(BaseTool):
         if not clean_to or '@' not in clean_to:
             err_msg = f"Send error: Invalid recipient email address provided ('{to}')."
             print(f"[SendEmailWithResume] ERROR: {err_msg}")
-            return err_msg
+            return ToolResult(success=False, message=err_msg)
 
         try:
             from src.tools.auto_apply_tool import get_resume_for_role
@@ -275,19 +312,30 @@ class SendEmailWithResumeTool(BaseTool):
                 userId='me', body={'raw': raw}
             ).execute()
 
-            return f"✅ Email successfully dispatched to {clean_to} with {resume_label} attached."
+            return ToolResult(
+                success=True,
+                message=f"✅ Email successfully dispatched to {clean_to} with {resume_label} attached.",
+            )
 
         except Exception as e:
             stack_trace = traceback.format_exc()
             print(f"[SendEmailWithResume] CRITICAL ERROR: {str(e)}\n{stack_trace}")
-            return f"Send error: {str(e)}"
+            return ToolResult(success=False, message=f"Send error: {str(e)}")
 
 
 class SendResumeEmailTool(BaseTool):
     name = "send_resume_email"
     description = "Send resume/portfolio via email to a person or recruiter"
+    args_schema = SendResumeEmailArgs
 
-    def run(self, *args, **kwargs) -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        # Matches core.py's active dispatch branch for this tool (to only —
+        # there's a second, unreachable elif branch in core.py for this same
+        # tool name that parses "to | role"; dead code, first match wins).
+        return {"to": raw.strip()}
+
+    def run(self, *args, **kwargs) -> ToolResult:
         to_arg = kwargs.get("to") or (args[0] if len(args) > 0 else "")
         role_arg = kwargs.get("role") or (args[1] if len(args) > 1 else "AI Engineer")
         name_arg = kwargs.get("name") or (args[2] if len(args) > 2 else "Hiring Manager")
@@ -297,7 +345,7 @@ class SendResumeEmailTool(BaseTool):
 
         clean_to = sanitize_email(to_arg)
         if not clean_to:
-            return "Send error: Destination email address is required."
+            return ToolResult(success=False, message="Send error: Destination email address is required.")
 
         try:
             from src.memory.profile import ProfileManager
@@ -320,6 +368,9 @@ Specializing in Python, FastAPI, React, and autonomous AI systems, I build produ
 Best regards,
 Athul Dev"""
 
+            # SendEmailWithResumeTool already returns a ToolResult — pass it
+            # straight through, no unwrapping needed since both tools share
+            # the same return type now.
             return SendEmailWithResumeTool().run(
                 to=clean_to,
                 subject=subject,
@@ -328,14 +379,19 @@ Athul Dev"""
             )
         except Exception as e:
             print(f"[SendResumeEmailTool] Error: {str(e)}")
-            return f"Send error: {str(e)}"
+            return ToolResult(success=False, message=f"Send error: {str(e)}")
 
 
 class SummarizeInboxTool(BaseTool):
     name = "summarize_inbox"
     description = "Summarize recent emails from Gmail inbox"
+    args_schema = SummarizeInboxArgs
 
-    def run(self, count: int = 10) -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {}
+
+    def run(self, count: int = 10) -> ToolResult:
         try:
             service = get_gmail_service()
             results = service.users().messages().list(
@@ -343,7 +399,7 @@ class SummarizeInboxTool(BaseTool):
             ).execute()
             messages = results.get('messages', [])
             if not messages:
-                return "Inbox is empty."
+                return ToolResult(success=True, message="Inbox is empty.")
             summaries = []
             for msg in messages[:count]:
                 m = service.users().messages().get(
@@ -355,6 +411,6 @@ class SummarizeInboxTool(BaseTool):
                     f"- {headers.get('Subject', 'No subject')} "
                     f"from {headers.get('From', 'Unknown')}"
                 )
-            return "Recent inbox:\n" + "\n".join(summaries)
+            return ToolResult(success=True, message="Recent inbox:\n" + "\n".join(summaries))
         except Exception as e:
-            return f"Error: {str(e)}"
+            return ToolResult(success=False, message=f"Error: {str(e)}")

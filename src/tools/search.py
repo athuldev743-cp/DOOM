@@ -1,11 +1,17 @@
 from ddgs import DDGS
 from src.tools.base import BaseTool
+from src.tools.schemas import ToolResult, WebSearchArgs
 
 class WebSearchTool(BaseTool):
     name = "web_search"
     description = "Search the web for current information"
+    args_schema = WebSearchArgs
 
-    def run(self, query: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"query": raw.strip()}
+
+    def run(self, query: str = "") -> ToolResult:
         try:
             results = []
             with DDGS() as ddgs:
@@ -15,6 +21,8 @@ class WebSearchTool(BaseTool):
                         f"  {r['body'][:200]}\n"
                         f"  {r['href']}"
                     )
-            return "\n\n".join(results) if results else "No results found."
+            if not results:
+                return ToolResult(success=True, message="No results found.")
+            return ToolResult(success=True, message="\n\n".join(results))
         except Exception as e:
-            return f"Search error: {str(e)}"
+            return ToolResult(success=False, message=f"Search error: {str(e)}")

@@ -1,17 +1,36 @@
 from src.tools.base import BaseTool
 from src.memory.profile import ProfileManager
+from src.tools.schemas import (
+    ToolResult, CallContactArgs, AddContactArgs,
+    ListContactsArgs, SetProfileArgs, GetProfileArgs,
+)
 
 profile = ProfileManager()
+
 
 class CallContactTool(BaseTool):
     name = "call_contact"
     description = "Call someone by name using phone's native dialer"
+    args_schema = CallContactArgs
 
-    def run(self, name: str) -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"name": raw.strip()}
+
+    def run(self, name: str) -> ToolResult:
         contact = profile.find_contact(name)
         if not contact:
-            return f"CALL_NOT_FOUND:{name}"
-        return f"CALL:{contact.phone}:{contact.name}"
+            return ToolResult(
+                success=False,
+                message=f"Contact '{name}' not found.",
+                raw=f"CALL_NOT_FOUND:{name}",
+            )
+        return ToolResult(
+            success=True,
+            message=f"Calling {contact.name}",
+            raw=f"CALL:{contact.phone}:{contact.name}",
+        )
+
 
 class WhatsAppContactTool(BaseTool):
     name = "whatsapp_contact"
@@ -56,38 +75,74 @@ class WhatsAppResumeTool(BaseTool):
         
         return f"WHATSAPP:{number}:{message}"
 
+
 class AddContactTool(BaseTool):
     name = "add_contact"
     description = "Add or update a contact in DOOM's memory"
+    args_schema = AddContactArgs
 
-    def run(self, name: str, phone: str = "", relationship: str = "", notes: str = "") -> str:
-        return profile.add_contact(name=name, phone=phone,
-                                   relationship=relationship, notes=notes)
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|")
+        return {
+            "name": parts[0].strip() if parts else "",
+            "phone": parts[1].strip() if len(parts) > 1 else "",
+            "relationship": parts[2].strip() if len(parts) > 2 else "",
+            "notes": parts[3].strip() if len(parts) > 3 else "",
+        }
+
+    def run(self, name: str, phone: str = "", relationship: str = "", notes: str = "") -> ToolResult:
+        result = profile.add_contact(name=name, phone=phone,
+                                      relationship=relationship, notes=notes)
+        return ToolResult(success=True, message=str(result))
+
 
 class ListContactsTool(BaseTool):
     name = "list_contacts"
     description = "List all saved contacts"
+    args_schema = ListContactsArgs
 
-    def run(self) -> str:
-        return profile.list_contacts()
+    def run(self) -> ToolResult:
+        return ToolResult(success=True, message=profile.list_contacts())
+
 
 class SetProfileTool(BaseTool):
     name = "set_profile"
     description = "Save personal information about Athul — goals, preferences, skills"
+    args_schema = SetProfileArgs
 
-    def run(self, key: str, value: str, category: str = "general") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|")
+        return {
+            "key": parts[0].strip() if parts else "",
+            "value": parts[1].strip() if len(parts) > 1 else "",
+        }
+
+    def run(self, key: str, value: str, category: str = "general") -> ToolResult:
         profile.set(key, value, category)
-        return f"✓ Saved: {key} = {value}"
+        return ToolResult(success=True, message=f"✓ Saved: {key} = {value}")
+
 
 class GetProfileTool(BaseTool):
     name = "get_profile"
     description = "Get Athul's personal information, goals, preferences"
+    args_schema = GetProfileArgs
 
-    def run(self, key: str = "") -> str:
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"key": raw.strip() if raw and raw != "none" else ""}
+
+    def run(self, key: str = "") -> ToolResult:
         if key:
             val = profile.get(key)
-            return f"{key}: {val}" if val else f"No info saved for: {key}"
+            if val:
+                return ToolResult(success=True, message=f"{key}: {val}")
+            return ToolResult(success=False, message=f"No info saved for: {key}")
+
         all_p = profile.get_all()
         if not all_p:
-            return "No profile info saved yet."
-        return "\n".join(f"- {k}: {v}" for k, v in all_p.items())
+            return ToolResult(success=True, message="No profile info saved yet.")
+
+        listing = "\n".join(f"- {k}: {v}" for k, v in all_p.items())
+        return ToolResult(success=True, message=listing, data={"profile": all_p})
