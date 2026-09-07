@@ -131,10 +131,13 @@ class JobSearchTool(BaseTool):
                 if shortfall > 0:
                     p = ProfileManager()
                     applied_keys = _load_applied_keys(p)
-                    locations = get_locations(p)
-                    location = locations[0] if locations else "Kochi Kerala"
 
-                    search_query = query.strip() if query and query.strip() else build_combined_query(location)
+                    # Deliberately ignoring the agent's raw free-text query here —
+                    # natural-language phrases like "find jobs for me" aren't real
+                    # search terms JSearch can match against. Always search the
+                    # structured priority-role query, nationwide.
+                    search_query = build_combined_query()
+                    print(f"[JobSearch] search_query='{search_query}'")
 
                     live_jobs = search_jobs(search_query, num_pages=1) or []
 

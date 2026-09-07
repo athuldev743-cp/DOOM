@@ -32,10 +32,11 @@ PUBLISHER_PLATFORM_MAP = {
 AUTO_APPLY_PLATFORMS = {"naukri", "wellfound"}
 
 
-def build_combined_query(location: str) -> str:
+def build_combined_query(location: str = "India") -> str:
+    """Defaults to nation-wide scope. A specific city can still be passed
+    in later if you want geographic targeting again."""
     roles_clause = " OR ".join(PRIORITY_ROLES)
     return f"{roles_clause} in {location}"
-
 
 def detect_platform_from_publisher(publisher: str) -> str:
     publisher_lower = (publisher or "").lower()
