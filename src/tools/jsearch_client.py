@@ -6,17 +6,11 @@ from typing import Optional
 from src.memory.profile import ProfileManager
 
 JSEARCH_HOST = "jsearch.p.rapidapi.com"
-JSEARCH_URL = f"https://{JSEARCH_HOST}/search"
+JSEARCH_URL = f"https://{JSEARCH_HOST}/search-v2"
 
-# RapidAPI's free JSearch tier is hard-capped at 200 requests/month.
-# SAFETY_MARGIN keeps us from ever bumping the actual ceiling — once we're
-# this close, calls are skipped rather than risking a 429 mid-run.
 MONTHLY_CALL_CAP = 200
 SAFETY_MARGIN = 20
 
-# Priority-ordered role terms — AI Engineer / Python Developer / Software
-# Engineer come first in the combined query string since JSearch has no
-# explicit weighting param; term order is the only lever we have.
 PRIORITY_ROLES = [
     "AI Engineer",
     "Python Developer",
@@ -25,7 +19,6 @@ PRIORITY_ROLES = [
     "Full Stack Developer",
 ]
 
-# job_publisher values JSearch returns -> our internal platform tag.
 PUBLISHER_PLATFORM_MAP = {
     "naukri": "naukri",
     "wellfound": "wellfound",
@@ -40,8 +33,6 @@ AUTO_APPLY_PLATFORMS = {"naukri", "wellfound"}
 
 
 def build_combined_query(location: str) -> str:
-    """One query string covering every priority role, so a full scan costs
-    a single JSearch call instead of one per role."""
     roles_clause = " OR ".join(PRIORITY_ROLES)
     return f"{roles_clause} in {location}"
 
@@ -73,19 +64,20 @@ def _increment_call_count(p: ProfileManager) -> int:
 
 
 def get_usage() -> dict:
-    """Diagnostics — how much of this month's free quota has been used."""
     p = ProfileManager()
     used = _get_call_count(p)
     return {"used": used, "cap": MONTHLY_CALL_CAP, "remaining": max(0, MONTHLY_CALL_CAP - used)}
 
 
-def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week") -> Optional[list]:
-    """Calls JSearch and returns a list of normalized job dicts:
-    {title, company, description, snippet, url, platform, auto_apply}
+def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week", country: str = "in") -> Optional[list]:
+    """Calls JSearch's /search-v2 endpoint. Returns normalized job dicts, or
+    None if the key is missing, quota guard trips, or the call fails.
 
-    Returns None (not an exception) if the key is missing, the quota guard
-    trips, or the call fails — callers should treat None the same as
-    "no new jobs this round," never as a crash condition.
+    NOTE: response field names below are copied from JSearch's v1 /search
+    docs. If v2 renames fields, the raw job.get(...) calls will just come
+    back empty/None and get filtered out silently below — run the raw-dump
+    diagnostic after this change to confirm field names still match before
+    trusting real results.
     """
     api_key = os.getenv("RAPIDAPI_KEY")
     if not api_key:
@@ -98,8 +90,13 @@ def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week") -> Op
         print(f"[JSearch] Quota guard tripped ({used}/{MONTHLY_CALL_CAP}) — skipping call.")
         return None
 
-    headers = {"X-RapidAPI-Key": api_key, "X-RapidAPI-Host": JSEARCH_HOST}
-    params = {"query": query, "page": "1", "num_pages": str(num_pages), "date_posted": date_posted}
+    headers = {"x-rapidapi-key": api_key, "x-rapidapi-host": JSEARCH_HOST, "Content-Type": "application/json"}
+    params = {
+        "query": query,
+        "num_pages": str(num_pages),
+        "date_posted": date_posted,
+        "country": country,
+    }
 
     try:
         resp = requests.get(JSEARCH_URL, headers=headers, params=params, timeout=15)
@@ -112,7 +109,10 @@ def search_jobs(query: str, num_pages: int = 1, date_posted: str = "week") -> Op
             print(f"[JSearch] Unexpected status {resp.status_code}: {resp.text[:300]}")
             return None
 
-        raw_jobs = (resp.json() or {}).get("data", []) or []
+        payload = resp.json() or {}
+        raw_jobs = payload.get("data", []) or []
+        print(f"[JSearch] Raw response keys: {list(payload.keys())} | {len(raw_jobs)} jobs in 'data'")
+
         normalized = []
         for job in raw_jobs:
             url = job.get("job_apply_link") or job.get("job_google_link") or ""
