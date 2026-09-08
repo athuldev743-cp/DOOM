@@ -1,7 +1,5 @@
-// auth.js
+﻿// auth.js
 // Google Sign-In integration.
-
-import { greetOwner } from './landing.js';
 
 export function initGoogleAuth() {
   google.accounts.id.initialize({
@@ -13,22 +11,12 @@ export function initGoogleAuth() {
   google.accounts.id.prompt();
 }
 
-function decodeJwtPayload(token) {
-  const payload = token.split('.')[1];
-  const json = decodeURIComponent(
-    atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
-      .split('')
-      .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join('')
-  );
-  return JSON.parse(json);
-}
-
 async function handleGoogleSignIn(response) {
   await fetch('/auth/google', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ credential: response.credential })
   });
-
+  // No UI change needed here — the cookie is now set, and main.js's
+  // initIdentity() (via /auth/whoami) picks up the name on next load.
 }
