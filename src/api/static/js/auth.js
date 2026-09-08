@@ -31,12 +31,4 @@ async function handleGoogleSignIn(response) {
     body: JSON.stringify({ credential: response.credential })
   });
 
-  try {
-    const { given_name, name } = decodeJwtPayload(response.credential);
-    greetOwner(given_name || name);
-  } catch (e) {
-    console.log('Could not decode sign-in name for greeting:', e);
-  }
-  // The cookie is now set, and future /chat-stream requests will
-  // automatically be treated as owner.
 }

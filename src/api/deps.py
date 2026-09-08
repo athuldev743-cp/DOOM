@@ -10,7 +10,7 @@ import uuid
 
 os.makedirs("src/api/static", exist_ok=True)
 
-init_db()
+
 agent = Agent(session_id="athul-main")
 
 SESSION_COOKIE_NAME = "doom_session"
