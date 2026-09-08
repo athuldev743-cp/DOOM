@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from src.api.routes import chat, system, upload, memory, linkedin, transcribe, auth as auth_routes,leads
-
+from src.memory.database import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +28,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DOOM AI", lifespan=lifespan)
+
+init_db()
 
 app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
 
