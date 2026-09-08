@@ -23,11 +23,11 @@ TOOLS AVAILABLE:
 STRICT RULES:
 1. ALWAYS use the correct tool — never guess or answer from memory when a tool exists
 2. For job requests:
-   - If user wants to SEARCH / FIND / SHOW jobs only → use job_search or platform search tool
+   - If user wants to SEARCH / FIND / SHOW jobs only → use job_search
    - If user explicitly says APPLY → use auto_apply or bulk_apply
    - NEVER use bulk_apply unless user clearly wants applications sent
 3. For emails, ALWAYS use read_emails or summarize_inbox — never say "I can't access email"
-4. For WhatsApp — ALWAYS use whatsapp_api_send, NEVER use whatsapp_contact
+4. For WhatsApp — use whatsapp_contact to send a message, whatsapp_resume to send portfolio/resume
 5. For explanations/concepts — answer directly, no tools needed
 6. Only use web_search for live news, prices, current events
 7. Tool format — respond with EXACTLY these two lines, nothing else:
@@ -49,16 +49,15 @@ call Dad → TOOL: call_contact / ARGS: Dad
 call Mom → TOOL: call_contact / ARGS: Mom
 call X → TOOL: call_contact / ARGS: X
 
-WHATSAPP — always use whatsapp_api_send:
-whatsapp Mom hey → TOOL: whatsapp_api_send / ARGS: Mom | hey
-whatsapp Dad hello → TOOL: whatsapp_api_send / ARGS: Dad | hello
-whatsapp X message Y → TOOL: whatsapp_api_send / ARGS: X | Y
-send whatsapp to Mom hey → TOOL: whatsapp_api_send / ARGS: Mom | hey
-send whatsapp to Dad hey → TOOL: whatsapp_api_send / ARGS: Dad | hey
-send whatsapp to X Y → TOOL: whatsapp_api_send / ARGS: X | Y
-send resume via whatsapp to X → TOOL: whatsapp_api_resume / ARGS: X
-send resume to Abijith → TOOL: whatsapp_api_resume / ARGS: Abijith
-broadcast whatsapp X → TOOL: whatsapp_broadcast / ARGS: X
+WHATSAPP — use whatsapp_contact to send a message, whatsapp_resume to send portfolio:
+whatsapp Mom hey → TOOL: whatsapp_contact / ARGS: Mom | hey
+whatsapp Dad hello → TOOL: whatsapp_contact / ARGS: Dad | hello
+whatsapp X message Y → TOOL: whatsapp_contact / ARGS: X | Y
+send whatsapp to Mom hey → TOOL: whatsapp_contact / ARGS: Mom | hey
+send whatsapp to Dad hey → TOOL: whatsapp_contact / ARGS: Dad | hey
+send whatsapp to X Y → TOOL: whatsapp_contact / ARGS: X | Y
+send resume via whatsapp to X → TOOL: whatsapp_resume / ARGS: X
+send resume to Abijith → TOOL: whatsapp_resume / ARGS: Abijith
 
 REMINDERS:
 remind me X → TOOL: save_reminder / ARGS: X
@@ -82,26 +81,18 @@ summarize inbox → TOOL: summarize_inbox / ARGS: none
 send email to X subject Y body Z → TOOL: send_email / ARGS: X | Y | Z
 send resume email to X → TOOL: send_resume_email / ARGS: X
 
-SEARCH ONLY — just show jobs no applying:
-find jobs → TOOL: job_search / ARGS: backend fullstack developer Kochi Kerala
-find backend jobs → TOOL: job_search / ARGS: backend developer Kochi Kerala
-find fullstack jobs → TOOL: job_search / ARGS: fullstack developer Kochi Kerala
-find ai jobs → TOOL: job_search / ARGS: AI engineer Kochi Kerala
-find all jobs → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-find good jobs → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-find good jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-good jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-any jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-show me jobs → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-what jobs are available → TOOL: job_search / ARGS: backend fullstack AI developer Kochi
-search naukri jobs → TOOL: naukri_search / ARGS: backend developer Kochi
-naukri backend jobs → TOOL: naukri_search / ARGS: backend developer Kochi
-naukri fullstack jobs → TOOL: naukri_search / ARGS: fullstack developer Kochi
-naukri ai jobs → TOOL: naukri_search / ARGS: AI engineer Kochi
-linkedin jobs → TOOL: linkedin_jobs / ARGS: backend developer Kochi
-linkedin backend jobs → TOOL: linkedin_jobs / ARGS: backend developer Kochi
-linkedin ai jobs → TOOL: linkedin_jobs / ARGS: AI engineer Kochi
-linkedin fullstack jobs → TOOL: linkedin_jobs / ARGS: fullstack developer Kochi
+JOBS — job_search reads the current pool (populated by the scheduled scanner), no live search call:
+find jobs → TOOL: job_search / ARGS: backend fullstack developer
+find backend jobs → TOOL: job_search / ARGS: backend developer
+find fullstack jobs → TOOL: job_search / ARGS: fullstack developer
+find ai jobs → TOOL: job_search / ARGS: AI engineer
+find all jobs → TOOL: job_search / ARGS: backend fullstack AI developer
+find good jobs → TOOL: job_search / ARGS: backend fullstack AI developer
+find good jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer
+good jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer
+any jobs for me → TOOL: job_search / ARGS: backend fullstack AI developer
+show me jobs → TOOL: job_search / ARGS: backend fullstack AI developer
+what jobs are available → TOOL: job_search / ARGS: backend fullstack AI developer
 
 APPLY — only when user explicitly says apply:
 apply for backend at X → TOOL: auto_apply / ARGS: X | Backend Developer
@@ -122,11 +113,6 @@ find and apply best backend jobs → TOOL: bulk_apply / ARGS: backend developer
 find and apply best fullstack jobs → TOOL: bulk_apply / ARGS: fullstack developer
 find and apply best ai jobs → TOOL: bulk_apply / ARGS: AI engineer
 find and apply all jobs → TOOL: bulk_apply / ARGS: backend fullstack AI developer
-apply → TOOL: apply_all_channels / ARGS: none
-apply all → TOOL: apply_all_channels / ARGS: none
-apply now → TOOL: apply_all_channels / ARGS: none
-apply for these jobs → TOOL: apply_all_channels / ARGS: none
-apply to these jobs → TOOL: apply_all_channels / ARGS: none
 
 HR EMAIL:
 find hr email for X → TOOL: find_hr_email / ARGS: X
@@ -142,9 +128,6 @@ cover letter for ai at X → TOOL: cover_letter / ARGS: X | AI Engineer
 score this JD → TOOL: score_jd / ARGS: [jd text]
 track job at X → TOOL: track_application / ARGS: X | role | applied
 my applications → TOOL: list_applications / ARGS: none
-
-LINKEDIN:
-my linkedin profile → TOOL: linkedin_profile / ARGS: none
 
 DOCUMENTS:
 search my docs → TOOL: search_docs / ARGS: query
@@ -169,6 +152,38 @@ morning briefing → TOOL: daily_briefing / ARGS: none
 what's my briefing → TOOL: daily_briefing / ARGS: none
 good morning → TOOL: daily_briefing / ARGS: none"""
 
+VISITOR_SYSTEM_PROMPT = f"""You are {APP_NAME}, Athul Dev's personal AI assistant.
+
+You're talking with someone who is NOT Athul — a website visitor. Athul
+isn't available to answer on his own behalf here. Your job is to have a
+natural, professional conversation: find out who they are (name, role —
+recruiter, hiring manager, developer, etc.), what company/context they're
+from, and what they're hoping to find or achieve here. Do this like a
+skilled host, not an interrogation — ask one thing at a time and follow
+the conversation naturally, don't front-load a checklist of questions.
+
+You can share, when relevant: this project (DOOM) demonstrates a
+multi-provider LLM fallback system, 25+ integrated tools spanning job
+search automation, communications, and PC automation, a PostgreSQL-backed
+memory system, and full observability tracing. If they're a recruiter or
+hiring manager, you can offer Athul's contact email: athuldev743@gmail.com.
+
+You have exactly ONE tool available: save_lead. Once you've naturally
+learned enough — even partial info, like just a name and what they want —
+call it to record them:
+TOOL: save_lead
+ARGS: name | role | company | what they're interested in | one-line summary
+
+Leave a field blank (nothing between its | marks) if you don't know it yet
+— don't block the conversation waiting to fill every field. You can call
+save_lead more than once as you learn more; it updates the same record.
+
+Do NOT attempt to use any other tool — you don't have access to Athul's
+email, jobs, contacts, calendar, or automation. If asked, say those are
+owner-only features.
+
+NEVER show TOOL: or ARGS: in your visible reply to the user."""
+
 
 
 def _get_profile_context() -> str:
@@ -184,13 +199,17 @@ def _get_profile_context() -> str:
 
 
 class Agent:
-    def __init__(self, session_id: str = "default"):
+    def __init__(self, session_id: str = "default", is_owner: bool = True):
+        self.session_id = session_id
+        self.is_owner = is_owner
         self.memory = MemoryManager(session_id=session_id)
-        self.system = SYSTEM_PROMPT + _get_profile_context()
+        base_prompt = SYSTEM_PROMPT if is_owner else VISITOR_SYSTEM_PROMPT
+        self.system = base_prompt + (_get_profile_context() if is_owner else "")
 
     def _build_messages(self, user_input: str) -> list:
         history = self.memory.load_history(limit=10)
-        fresh_system = SYSTEM_PROMPT + _get_profile_context()
+        base_prompt = SYSTEM_PROMPT if self.is_owner else VISITOR_SYSTEM_PROMPT
+        fresh_system = base_prompt + (_get_profile_context() if self.is_owner else "")
         messages = [{"role": "system", "content": fresh_system}]
         messages += history
         messages.append({"role": "user", "content": user_input})
@@ -220,10 +239,10 @@ class Agent:
         return "\n".join(clean).strip()
 
     def _unwrap(self, result):
-        """Bridge for the in-progress Pydantic tool migration: converted
-        tools return a ToolResult, unconverted tools still return a plain
-        str. This makes both work through the same dispatch unchanged —
-        remove once every tool has been converted."""
+        """Bridge for the Pydantic tool migration: every tool now returns
+        ToolResult except the two WhatsApp tools (intentionally left as
+        plain strings, WhatsApp out of scope). This makes both work through
+        the same dispatch unchanged."""
         if isinstance(result, ToolResult):
             return result.to_wire()
         return result
@@ -318,18 +337,6 @@ class Agent:
             status = parts[2].strip() if len(parts) > 2 else "applied"
             return self._unwrap(tool.run(company=company, role=role, status=status))
 
-        elif tool_name == "linkedin_profile":
-            return self._unwrap(tool.run())
-
-        elif tool_name == "linkedin_jobs":
-            return self._unwrap(tool.run(query=args))
-
-        elif tool_name == "naukri_search":
-            return self._unwrap(tool.run(query=args))
-
-        elif tool_name == "naukri_scrape":
-            return self._unwrap(tool.run(query=args))
-
         elif tool_name == "find_hr_email":
             return self._unwrap(tool.run(company=args))
 
@@ -345,15 +352,22 @@ class Agent:
         elif tool_name == "list_applications":
             return self._unwrap(tool.run())
 
+        elif tool_name == "save_lead":
+                    parts = args.split("|")
+                    name = parts[0].strip() if len(parts) > 0 else ""
+                    role = parts[1].strip() if len(parts) > 1 else ""
+                    company = parts[2].strip() if len(parts) > 2 else ""
+                    interest = parts[3].strip() if len(parts) > 3 else ""
+                    summary = parts[4].strip() if len(parts) > 4 else ""
+                    return self._unwrap(tool.run(
+                        session_key=self.session_id, name=name, role=role,
+                        company=company, interest=interest, summary=summary,
+                    ))
+
         elif tool_name == "daily_briefing":
             return self._unwrap(tool.run())
 
-        elif tool_name == "send_resume_email":
-            parts = args.split("|")
-            to = parts[0].strip()
-            role = parts[1].strip() if len(parts) > 1 else ""
-            return self._unwrap(tool.run(to=to, role=role))
-    
+        
 
         elif tool_name in [
             "list_contacts",
@@ -363,18 +377,6 @@ class Agent:
             "get_datetime",
         ]:
             return self._unwrap(tool.run())
-
-        elif tool_name == "whatsapp_api_send":
-            parts = args.split("|")
-            name = parts[0].strip()
-            message = parts[1].strip() if len(parts) > 1 else ""
-            return self._unwrap(tool.run(name=name, message=message))
-
-        elif tool_name == "whatsapp_broadcast":
-            return self._unwrap(tool.run(message=args))
-
-        elif tool_name == "whatsapp_api_resume":
-            return self._unwrap(tool.run(name=args.strip()))
 
         else:
             return self._unwrap(tool.run())

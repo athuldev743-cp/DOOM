@@ -63,6 +63,7 @@ class ApplyQueueItem(Base):
     )
 
 
+
 # 3. Database Engine & Session Setup
 connect_args = {}
 engine_kwargs = {
@@ -91,6 +92,22 @@ SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
 )
+
+class Visitor(Base):
+    __tablename__ = "visitors"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_key = Column(String, index=True)   # anon visitor-cookie id — ties turns to one person
+    name = Column(String, nullable=True)
+    role = Column(String, nullable=True)       # "Recruiter", "Hiring Manager", "Developer", etc.
+    company = Column(String, nullable=True)
+    interest = Column(Text, nullable=True)     # what they said they're after
+    summary = Column(Text, nullable=True)      # short excerpt of the conversation
+    first_seen = Column(DateTime, default=datetime.utcnow)
+    last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_visitors_session_key", "session_key"),
+    )
 
 
 def get_db():

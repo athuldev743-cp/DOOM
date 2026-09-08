@@ -2,33 +2,50 @@ import json
 import os
 import asyncio
 import re
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest
-from src.api.deps import agent, get_current_identity, Identity
-from src.api.auth import HR_FALLBACK_RESPONSE
+from src.api.deps import agent, get_current_identity, Identity, VISITOR_COOKIE_NAME
+from src.agent.core import Agent
 
 router = APIRouter()
+
+VISITOR_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days — long enough to reconnect the same visitor
+
+
+def _visitor_agent(identity: Identity) -> Agent:
+    # A fresh Agent per request is fine here: MemoryManager loads/saves
+    # history from the DB keyed by session_id, so there's no in-memory
+    # state worth caching, and it guarantees no cross-visitor bleed.
+    return Agent(session_id=f"visitor-{identity.visitor_key}", is_owner=False)
 
 
 @router.post("/chat")
 async def chat_endpoint(
     request: ChatRequest,
+    response: Response,
     identity: Identity = Depends(get_current_identity),
 ):
     if not identity.is_owner:
-        return {"response": HR_FALLBACK_RESPONSE, "audio_url": None, "status": "ok"}
+        response.set_cookie(
+            VISITOR_COOKIE_NAME, identity.visitor_key,
+            max_age=VISITOR_COOKIE_MAX_AGE, httponly=True, samesite="lax",
+        )
+        text_response = await _visitor_agent(identity).chat(request.message)
+        # No TTS for visitor chat — keeps their responses fast, and voice
+        # output isn't needed for an unauthenticated conversation.
+        return {"response": text_response, "audio_url": None, "status": "ok"}
 
     from src.voice.tts_server import text_to_speech
 
     # Get text response immediately
-    response = await agent.chat(request.message)
+    text_response = await agent.chat(request.message)
 
     # Generate TTS in background — don't block text response
     audio_url = None
     try:
         audio_path = await asyncio.wait_for(
-            text_to_speech(response), timeout=5.0
+            text_to_speech(text_response), timeout=5.0
         )
         if audio_path:
             filename = os.path.basename(audio_path)
@@ -39,7 +56,7 @@ async def chat_endpoint(
         print(f"[TTS] Error: {e}")
 
     return {
-        "response": response,
+        "response": text_response,
         "audio_url": audio_url,
         "status": "ok"
     }
@@ -52,7 +69,8 @@ async def chat_stream(
 ):
     async def generate():
         if not identity.is_owner:
-            yield f"data: {json.dumps({'type': 'text', 'content': HR_FALLBACK_RESPONSE})}\n\n"
+            text_response = await _visitor_agent(identity).chat(request.message)
+            yield f"data: {json.dumps({'type': 'text', 'content': text_response})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             return
 
@@ -80,7 +98,17 @@ async def chat_stream(
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    resp = StreamingResponse(generate(), media_type="text/event-stream")
+    if not identity.is_owner:
+        # Set directly on this Response object — a dependency-injected
+        # Response's Set-Cookie is dropped when the route returns its own
+        # Response subclass (StreamingResponse here), so it has to happen
+        # at this level to actually reach the browser.
+        resp.set_cookie(
+            VISITOR_COOKIE_NAME, identity.visitor_key,
+            max_age=VISITOR_COOKIE_MAX_AGE, httponly=True, samesite="lax",
+        )
+    return resp
 
 
 @router.post("/tts")
@@ -150,8 +178,11 @@ async def get_reminders():
 
 
 @router.delete("/reset")
-async def reset():
-    agent.reset()
+async def reset(identity: Identity = Depends(get_current_identity)):
+    if identity.is_owner:
+        agent.reset()
+    else:
+        _visitor_agent(identity).reset()
     return {"status": "cleared"}
 
 @router.post("/api/apply-job")

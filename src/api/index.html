@@ -29,8 +29,9 @@
       </div>
     </div>
     <div class="header-actions">
-      <div class="success-rate-badge" id="success-rate-badge">📊 --</div>
-    </div>
+  <button class="icon-btn" id="leads-toggle-btn" title="Visitors" style="display:none;">👥</button>
+  <div class="success-rate-badge" id="success-rate-badge">📊 --</div>
+</div>
   </div>
 
   <!-- LANDING GREETING (fades out on first interaction) -->
@@ -108,6 +109,30 @@
   <div class="apply-progress-company" id="apply-progress-company">—</div>
   <div class="apply-progress-track">
     <div class="apply-progress-fill" id="apply-progress-fill"></div>
+  </div>
+</div>
+<!-- LEADS SIDEBAR (admin only) -->
+<div class="leads-panel" id="leads-panel">
+  <div class="leads-sheet">
+    <div class="leads-header">
+      <span class="sheet-title" style="margin-bottom:0;">👥 VISITORS</span>
+      <button class="job-modal-close" id="leads-close-btn">✕</button>
+    </div>
+    <div id="leads-list"></div>
+  </div>
+</div>
+
+<!-- LEAD DETAIL MODAL -->
+<div class="job-modal-panel" id="lead-modal">
+  <div class="job-modal-sheet">
+    <div class="job-modal-header">
+      <div>
+        <h2 id="lead-modal-name">Visitor</h2>
+        <p id="lead-modal-role">—</p>
+      </div>
+      <button class="job-modal-close" id="lead-modal-close-btn">✕</button>
+    </div>
+    <div class="job-modal-body" id="lead-modal-body"></div>
   </div>
 </div>
 

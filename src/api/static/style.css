@@ -955,3 +955,70 @@ html, body {
 .composer #input {
   max-height: 220px;
 }
+
+/* ── LEADS SIDEBAR ── */
+.leads-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #000000cc;
+  z-index: 100;
+  justify-content: flex-start;
+}
+
+.leads-panel.open { display: flex; }
+
+.leads-sheet {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  width: min(82vw, 300px);
+  height: 100%;
+  overflow-y: auto;
+  padding: 18px;
+  animation: slideInLeft 0.22s ease;
+}
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+.leads-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.lead-item {
+  padding: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.lead-item:hover { border-color: var(--red-border); }
+
+.lead-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.lead-item-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'DM Mono', monospace;
+  margin-top: 3px;
+}
+
+.leads-empty {
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 40px 10px;
+  font-family: 'DM Mono', monospace;
+}

@@ -42,7 +42,7 @@ def verify_google_id_token(token: str) -> dict | None:
     return idinfo
 
 
-def create_session_token(email: str) -> str:
+def create_session_token(email: str, name: str = "") -> str:
     """Issue DOOM's own signed session token, used after Google verification
     succeeds so we don't have to re-verify a Google token on every request."""
     if not SESSION_SECRET:
@@ -51,6 +51,7 @@ def create_session_token(email: str) -> str:
     now = int(time.time())
     payload = {
         "email": email,
+        "name": name,
         "is_owner": True,
         "iat": now,
         "exp": now + SESSION_MAX_AGE_SECONDS,

@@ -1,7 +1,6 @@
 // landing.js
-// The landing hero: greets the owner by name (once Google sign-in
-// resolves) or shows a generic intro for everyone else, then fades
-// out on first interaction.
+// The landing hero: greets the owner by name, or shows the generic
+// intro for visitors, then fades out on first interaction.
 
 const hero = document.getElementById('landing-hero');
 const greetingEl = document.getElementById('hero-greeting');
@@ -10,16 +9,15 @@ const subEl = document.getElementById('hero-sub');
 let dismissed = false;
 let autoDismissTimer = null;
 
-export function initLanding() {
-  // Auto-dismiss after a few seconds if the visitor hasn't typed yet —
-  // mirrors the ChatGPT-style "greeting fades, composer takes over" feel.
+export function initLandingTimer() {
   autoDismissTimer = setTimeout(dismissHero, 4000);
 }
 
-export function greetOwner(name) {
-  if (!name) return;
-  greetingEl.textContent = `Hi ${name} 👋`;
-  subEl.textContent = "Good to see you — what are we working on today?";
+export function applyLandingGreeting(identity) {
+  if (identity.is_owner && identity.name) {
+    greetingEl.textContent = `Hi ${identity.name} 👋`;
+    subEl.textContent = "Good to see you — what are we working on today?";
+  }
 }
 
 export function dismissHero() {
