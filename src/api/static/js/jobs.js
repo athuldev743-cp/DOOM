@@ -176,26 +176,7 @@ export async function sendEmailForJob(index) {
 
 // "Email All" bulk button in the job-cards toolbar. Calls the
 // BulkApplyTool-backed /api/send-email-all route.
-export async function emailAllJobs() {
-  if (emailAllRunning) return;
-  if (!confirm('Send application emails for every job currently in the pool?')) return;
 
-  emailAllRunning = true;
-  const btn = document.getElementById('email-all-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
-
-  try {
-    const res = await fetch('/api/send-email-all', { method: 'POST' });
-    const data = await res.json();
-    deps.addMessage('doom', (data.result || 'No result returned.').replace(/\n/g, '<br/>'));
-  } catch (e) {
-    deps.addMessage('doom', '❌ Email-all request failed.');
-  }
-
-  if (btn) { btn.disabled = false; btn.textContent = 'Email All 📧'; }
-  emailAllRunning = false;
-  updateSuccessRate();
-}
 
 // --- Bulk apply ---
 
