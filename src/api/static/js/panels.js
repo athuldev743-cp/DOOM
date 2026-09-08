@@ -46,7 +46,7 @@ export async function uploadDoc(input) {
 }
 
 export async function getBriefing() {
-  const btn = document.querySelector('[title="Daily Briefing"]');
+  const btn = document.getElementById('menu-briefing-btn');
   if (btn) { btn.textContent = '⏳'; btn.style.pointerEvents = 'none'; }
 
   const thinking = addMessage('doom', '<div class="thinking-dots"><span></span><span></span><span></span></div>');

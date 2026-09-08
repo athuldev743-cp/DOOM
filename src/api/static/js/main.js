@@ -1,33 +1,62 @@
 // main.js
-// App bootstrap: initializes each module and wires up static DOM
-// event listeners (dynamically-generated job-card buttons are wired
-// inside jobs.js itself, since they're built from template strings).
-
 import { dom } from './core.js';
 import { initGoogleAuth } from './auth.js';
 import { toggleSpeak, initVoiceInput } from './audio.js';
 import { sendMessage, addMessage, clearChat, initChat } from './chat.js';
 import { initJobs, closeJobModal, forceCloseJobModal, cancelApplyAll } from './jobs.js';
 import { toggleMemory, closeMemory, uploadDoc, getBriefing } from './panels.js';
+import { initLanding, dismissHero } from './landing.js';
 
-// Break the chat.js <-> jobs.js circular dependency: jobs.js needs
-// sendMessage (for "Auto-apply" prompts) and addMessage (for the
-// email-all result bubble). Inject them here instead of importing
-// jobs.js -> chat.js directly.
 initJobs({ sendMessage, addMessage });
-
 initChat();
 initVoiceInput(sendMessage);
+initLanding();
 window.addEventListener('load', initGoogleAuth);
 
-// Header buttons
-dom.speakBtn.addEventListener('click', toggleSpeak);
-document.querySelector('[title="Daily Briefing"]').addEventListener('click', getBriefing);
-document.querySelector('[title="Memory"]').addEventListener('click', toggleMemory);
-document.querySelector('[title="Clear"]').addEventListener('click', clearChat);
+// Dismiss the landing hero the moment the visitor engages with anything.
+dom.inputEl.addEventListener('input', dismissHero, { once: true });
+dom.sendBtn.addEventListener('click', dismissHero, { once: true });
+dom.micBtn.addEventListener('click', dismissHero, { once: true });
 
-// Upload
+// Audio toggle (now living on the right of the composer)
+dom.speakBtn.addEventListener('click', toggleSpeak);
+
+// "+" popover menu
+const plusBtn = document.getElementById('plus-btn');
+const plusMenu = document.getElementById('plus-menu');
+
+plusBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  plusMenu.classList.toggle('open');
+  plusBtn.classList.toggle('open');
+});
+
+document.addEventListener('click', (e) => {
+  if (!plusMenu.contains(e.target) && e.target !== plusBtn) {
+    plusMenu.classList.remove('open');
+    plusBtn.classList.remove('open');
+  }
+});
+
+function closePlusMenu() {
+  plusMenu.classList.remove('open');
+  plusBtn.classList.remove('open');
+}
+
+document.getElementById('menu-briefing-btn').addEventListener('click', () => {
+  closePlusMenu();
+  getBriefing();
+});
+document.getElementById('menu-memory-btn').addEventListener('click', () => {
+  closePlusMenu();
+  toggleMemory();
+});
+document.getElementById('menu-clear-btn').addEventListener('click', () => {
+  closePlusMenu();
+  clearChat();
+});
 document.getElementById('file-upload').addEventListener('change', function () {
+  closePlusMenu();
   uploadDoc(this);
 });
 

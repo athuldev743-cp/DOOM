@@ -16,7 +16,7 @@
 <body>
 <div class="app">
 
-  <!-- HEADER -->
+  <!-- HEADER (minimal — just identity + status) -->
   <div class="header">
     <div class="header-left">
       <div class="logo">D</div>
@@ -29,35 +29,19 @@
       </div>
     </div>
     <div class="header-actions">
-      <div class="icon-btn" id="speak-btn" title="Toggle voice">🔊</div>
-      <div class="icon-btn" title="Daily Briefing">☀️</div>
-      <div class="icon-btn" title="Memory">🧠</div>
-      <div class="icon-btn" title="Clear">🗑</div>
+      <div class="success-rate-badge" id="success-rate-badge">📊 --</div>
     </div>
   </div>
 
-
-  <!-- STATS BAR -->
-  <div class="stats-bar">
-    <div class="success-rate-badge" id="success-rate-badge">📊 --</div>
-  </div>
-
-
-  <!-- UPLOAD BAR -->
-  <div class="upload-bar">
-    <label class="upload-label">
-      📎 upload document
-      <input type="file" id="file-upload" accept=".pdf,.txt,.md" style="display:none" />
-    </label>
+  <!-- LANDING GREETING (fades out on first interaction) -->
+  <div class="landing-hero" id="landing-hero">
+    <div class="hero-mark">D</div>
+    <h1 class="hero-greeting" id="hero-greeting">Hi there 👋</h1>
+    <p class="hero-sub" id="hero-sub">I'm DOOM — Athul's personal AI assistant.</p>
   </div>
 
   <!-- MESSAGES -->
-  <div id="messages">
-    <div class="msg-row">
-      <div class="avatar doom">D</div>
-      <div class="bubble doom">Hey Athul! DOOM online and ready 🔥<br/>Voice, search, reminders, calls — just ask.</div>
-    </div>
-  </div>
+  <div id="messages"></div>
 
   <!-- VOICE BANNER -->
   <div class="voice-banner" id="voice-banner">🎤 listening... speak now</div>
@@ -65,9 +49,23 @@
   <!-- INPUT -->
   <div class="input-area">
     <div class="composer">
+      <div class="plus-menu-wrap">
+        <button class="plus-btn" id="plus-btn" aria-label="More actions" type="button">+</button>
+        <div class="plus-menu" id="plus-menu">
+          <label class="plus-menu-item" for="file-upload">📎 Upload document</label>
+          <button class="plus-menu-item" id="menu-briefing-btn" type="button">☀️ Daily briefing</button>
+          <button class="plus-menu-item" id="menu-memory-btn" type="button">🧠 Memory</button>
+          <button class="plus-menu-item" id="menu-clear-btn" type="button">🗑 Clear chat</button>
+        </div>
+      </div>
+
+      <input type="file" id="file-upload" accept=".pdf,.txt,.md" style="display:none" />
+
       <textarea id="input" placeholder="Message DOOM..." rows="1"></textarea>
-      <button class="mic-btn" id="mic" aria-label="Voice input">🎤</button>
-      <button class="send-btn" id="send" aria-label="Send message">➤</button>
+
+      <button class="mic-btn" id="mic" aria-label="Voice input" type="button">🎤</button>
+      <button class="audio-btn" id="speak-btn" aria-label="Toggle voice" type="button">🔊</button>
+      <button class="send-btn" id="send" aria-label="Send message" type="button">➤</button>
     </div>
   </div>
 
