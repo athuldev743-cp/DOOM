@@ -27,8 +27,7 @@ class ToolResult(BaseModel):
 
 class JobSearchArgs(BaseModel):
     query: str = ""
-    limit: int = 20
-
+    limit: int = 50
 
 class CoverLetterArgs(BaseModel):
     company: str = ""

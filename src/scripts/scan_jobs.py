@@ -7,31 +7,24 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, init_db
 from src.memory.profile import ProfileManager
-from src.tools.jobs_tool import _load_applied_keys, _is_already_applied, get_locations
+from src.tools.jobs_tool import _load_applied_keys, _is_already_applied
 from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.tools.job_scoring import score_job
 
-MAX_POOL_SIZE = 20  # keep the rolling pool capped — trim lowest-scored when exceeded
+MAX_POOL_SIZE = 50  # keep the rolling pool capped — trim lowest-scored when exceeded
 
 
 def run_scan():
     init_db()
     db = SessionLocal()
     p = ProfileManager()
-    locations = get_locations(p)
     applied_keys = _load_applied_keys(p)
-
-    # Rotate through locations by hour-of-day, same as before — but now it's
-    # ONE JSearch call per run instead of 20 DDG queries, to stay inside the
-    # 200 requests/month free tier.
-    current_location = locations[datetime.utcnow().hour % len(locations)]
-    print(f"[Scan] This hour's location: {current_location}")
 
     existing_urls = {u.url for u in db.query(SeenUrl.url).all()}
     new_count = 0
 
     try:
-        query = build_combined_query(current_location)
+        query = build_combined_query()  # nationwide — no location targeting
         live_jobs = search_jobs(query, num_pages=1) or []
         print(f"[Scan] JSearch returned {len(live_jobs)} jobs for '{query}'")
 
@@ -61,8 +54,7 @@ def run_scan():
         db.commit()
         print(f"[Scan] Done. {new_count} new matches added.")
 
-        # Compare/replace — keep only the top MAX_POOL_SIZE-scored unsent jobs
-        unsent = db.query(DailyJobMatch).filter_by(sent=False).order_by(DailyJobMatch.score.desc()).all()
+        unsent = db.query(DailyJobMatch).filter_by(applied=False).order_by(DailyJobMatch.score.desc()).all()
         if len(unsent) > MAX_POOL_SIZE:
             to_drop = unsent[MAX_POOL_SIZE:]
             for job in to_drop:

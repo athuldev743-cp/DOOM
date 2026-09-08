@@ -533,7 +533,9 @@ class BulkApplyTool(BaseTool):
             report = f"🎯 Starting bulk apply for {len(jobs)} jobs:\n\n"
             applied, skipped = 0, 0
 
-            for idx, job in enumerate(jobs[:5], 1):
+            MAX_BULK_EMAILS = 20  
+
+            for idx, job in enumerate(jobs[:MAX_BULK_EMAILS], 1):
                 company = job.get("company", "Hiring Company")
                 role = job.get("title", "Developer")
 

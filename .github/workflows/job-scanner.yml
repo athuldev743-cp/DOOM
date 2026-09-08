@@ -1,8 +1,13 @@
 name: Job Scanner
 on:
   schedule:
-    - cron: "0 * * * *"  # every hour, all 24 hours
-  workflow_dispatch: {}   # lets you trigger manually from GitHub UI too
+    - cron: "0 1 * * *"    # 6:30 AM IST
+    - cron: "0 4 * * *"    # 9:30 AM IST
+    - cron: "30 6 * * *"   # 12:00 PM IST
+    - cron: "0 10 * * *"   # 3:30 PM IST
+    - cron: "0 13 * * *"   # 6:30 PM IST
+    - cron: "0 16 * * *"   # 9:30 PM IST
+  workflow_dispatch: {}
 
 jobs:
   scan:
@@ -23,4 +28,5 @@ jobs:
           PYTHONPATH: .
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
         run: python -m src.scripts.scan_jobs

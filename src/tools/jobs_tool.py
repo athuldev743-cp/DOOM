@@ -5,15 +5,15 @@ from src.tools.schemas import (
     ToolResult, JobSearchArgs, CoverLetterArgs, ScoreJDArgs,
     TrackApplicationArgs, ListApplicationsArgs,
 )
-from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.memory.profile import ProfileManager
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl
 
 
 def _load_applied_keys(p: ProfileManager) -> set:
-    """Build a set of (company, role) pairs already applied to, so job_search can exclude them."""
+    """Build a set of (company, role) pairs already applied to — used by
+    scan_jobs.py to avoid re-adding jobs you've already gone after."""
     history_raw = p.get("application_history") or "[]"
     try:
         records = json.loads(history_raw)
@@ -43,8 +43,23 @@ def _is_already_applied(company: str, title: str, applied_keys: set) -> bool:
     return False
 
 
-# Kept for backward compatibility — auto_apply_tool.py or other files may
-# still reference these platform names / the auto_apply flag by platform.
+def _mark_pool_job_applied(url: str) -> None:
+    """Flips the matching DailyJobMatch row so it drops out of future
+    'find jobs' pool listings once you've acted on it (emailed or
+    clicked through to apply). Pool jobs otherwise stay visible across
+    repeated 'find jobs' calls indefinitely."""
+    if not url:
+        return
+    db = SessionLocal()
+    try:
+        match = db.query(DailyJobMatch).filter_by(url=url).first()
+        if match:
+            match.applied = True
+            db.commit()
+    finally:
+        db.close()
+
+
 JOB_PLATFORMS = {
     "naukri": {"domain": "naukri.com", "auto_apply": True},
     "wellfound": {"domain": "wellfound.com", "auto_apply": True},
@@ -58,62 +73,52 @@ JOB_PLATFORMS = {
 
 
 def get_locations(p: ProfileManager) -> list:
-    """Location is stored as a comma-separated string so multiple target
-    locations (e.g. 'Kochi Kerala, NYC') all get searched, not just the last one set."""
+    """Kept for backward compatibility — no longer used by scan_jobs.py
+    now that scans are nationwide, but left here in case anything else
+    references it."""
     raw = p.get('location') or 'Kochi Kerala'
     return [loc.strip() for loc in raw.split(',') if loc.strip()]
 
 
 class JobSearchTool(BaseTool):
     name = "job_search"
-    description = "Search real, previously-unseen job postings via JSearch (LinkedIn, Indeed, Naukri, Glassdoor, and more)."
+    description = "Show all currently open jobs in the pool (populated by the scheduled scanner) — no live search call, just reads what's already been found."
     args_schema = JobSearchArgs
 
     @classmethod
     def parse_args(cls, raw: str) -> dict:
         return {"query": raw.strip()}
 
-    def run(self, query: str = "", limit: int = 20) -> ToolResult:
-        """Hybrid delivery: serves whatever's already in the pool (instant),
-        then tops up with a LIVE JSearch call only for the shortfall if the
-        pool has fewer than `limit` unsent jobs. Enforces a 24h cooldown
-        between full deliveries.
+    def run(self, query: str = "", limit: int = 50) -> ToolResult:
+        """Serves the entire current job pool. The pool is built exclusively
+        by the scheduled scan_jobs.py scanner (6x/day) — this tool never
+        makes its own JSearch call, so 'find jobs' costs zero API quota no
+        matter how many times it's called. Jobs stay visible across repeated
+        calls until marked applied (via _mark_pool_job_applied) or dropped
+        by the scanner's score-based pool trim.
         """
         try:
-            p_check = ProfileManager()
-            last_search_str = p_check.get("last_job_search_at")
-            if last_search_str:
-                try:
-                    last_search_at = datetime.fromisoformat(last_search_str)
-                    elapsed = datetime.utcnow() - last_search_at
-                    if elapsed < timedelta(hours=24):
-                        remaining = timedelta(hours=24) - elapsed
-                        hours_left = int(remaining.total_seconds() // 3600)
-                        minutes_left = int((remaining.total_seconds() % 3600) // 60)
-                        return ToolResult(
-                            success=True,
-                            message=(
-                                f"You already got today's batch of jobs. Next batch available in "
-                                f"{hours_left}h {minutes_left}m — or check 'my applications' to review what's pending."
-                            ),
-                        )
-                except Exception:
-                    pass
-
             db = SessionLocal()
-
             try:
                 pool_matches = (
                     db.query(DailyJobMatch)
-                    .filter_by(sent=False)
+                    .filter_by(applied=False)
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
                 )
 
+                if not pool_matches:
+                    return ToolResult(
+                        success=False,
+                        message="No jobs in the pool right now — the scanner runs several times a day, check back soon.",
+                    )
+
                 jobs = []
-                for m in pool_matches:
+                for i, m in enumerate(pool_matches):
                     jobs.append({
+                        "id": f"job_{i}",
+                        "index": i,
                         "title": m.title,
                         "company": m.company,
                         "snippet": (m.description or "")[:200],
@@ -123,90 +128,21 @@ class JobSearchTool(BaseTool):
                         "auto_apply": JOB_PLATFORMS.get(m.source, {}).get("auto_apply", False),
                         "score": m.score,
                     })
-                    m.sent = True
-
-                shortfall = limit - len(jobs)
-                print(f"[JobSearch] Pool had {len(pool_matches)} unsent — shortfall of {shortfall}")
-
-                if shortfall > 0:
-                    p = ProfileManager()
-                    applied_keys = _load_applied_keys(p)
-
-                    # Deliberately ignoring the agent's raw free-text query here —
-                    # natural-language phrases like "find jobs for me" aren't real
-                    # search terms JSearch can match against. Always search the
-                    # structured priority-role query, nationwide.
-                    search_query = build_combined_query()
-                    print(f"[JobSearch] search_query='{search_query}'")
-
-                    live_jobs = search_jobs(search_query, num_pages=1) or []
-
-                    live_urls = [j["url"] for j in live_jobs]
-                    already_seen = set()
-                    if live_urls:
-                        already_seen = {
-                            row.url for row in db.query(SeenUrl.url).filter(SeenUrl.url.in_(live_urls)).all()
-                        }
-
-                    resolved = []
-                    for job in live_jobs:
-                        if job["url"] in already_seen:
-                            continue
-                        if _is_already_applied(job["company"], job["title"], applied_keys):
-                            continue
-                        resolved.append(job)
-                        if len(resolved) >= shortfall:
-                            break
-
-                    now = datetime.utcnow()
-                    for job in resolved:
-                        db.add(SeenUrl(url=job["url"], first_seen=now))
-                        db.add(DailyJobMatch(
-                            url=job["url"], title=job["title"], company=job["company"],
-                            description=job["description"][:4000], source=job["platform"],
-                            found_at=now, sent=True, applied=False,
-                        ))
-                        jobs.append({
-                            "title": job["title"], "company": job["company"],
-                            "snippet": job["snippet"], "description": job["description"],
-                            "url": job["url"], "platform": job["platform"],
-                            "auto_apply": job["auto_apply"], "score": 0,
-                        })
-
-                    print(f"[JobSearch] Top-up added {len(resolved)} live-found jobs")
-
-                db.commit()
-
-                if not jobs:
-                    return ToolResult(
-                        success=False,
-                        message="No jobs found right now, even after a live top-up search — try again shortly.",
-                    )
-
-                for i, job in enumerate(jobs):
-                    job["id"] = f"job_{i}"
-                    job["index"] = i
 
                 p = ProfileManager()
                 p.set("latest_job_search", json.dumps(jobs), "career")
-                p.set("last_job_search_at", datetime.utcnow().isoformat(), "career")
 
                 platform_counts = {}
                 for job in jobs:
                     plat = job["platform"]
                     platform_counts[plat] = platform_counts.get(plat, 0) + 1
 
-                print(f"[JobSearch] Returning {len(jobs)} jobs")
                 return ToolResult(
                     success=True,
                     message=f"Found {len(jobs)} jobs.",
                     data={"jobs": jobs, "platform_counts": platform_counts},
                     prefix="JOBS_DATA",
                 )
-
-            except Exception:
-                db.rollback()
-                raise
             finally:
                 db.close()
 
@@ -217,9 +153,9 @@ class JobSearchTool(BaseTool):
 
 def apply_to_single_job(index: int) -> dict:
     """Manual platform apply — user clicks through to the real listing.
-    Called directly by the /api/apply-single-job route, NOT through the agent's
-    tool dispatch — so it's outside the args_schema/ToolResult refactor and
-    keeps returning a plain dict."""
+    Called directly by the /api/apply-single-job route, NOT through the
+    agent's tool dispatch — so it's outside the args_schema/ToolResult
+    refactor and keeps returning a plain dict."""
     p = ProfileManager()
     latest = p.get("latest_job_search")
     if not latest:
@@ -238,6 +174,7 @@ def apply_to_single_job(index: int) -> dict:
         return {"success": False, "message": "No direct platform link available for this job."}
 
     TrackApplicationTool().run(company=company, role=title, status="applied")
+    _mark_pool_job_applied(url)
 
     return {
         "success": True,
@@ -266,6 +203,8 @@ def email_only_for_job(index: int) -> dict:
         job_index=index + 1,
         track=False,
     )
+    if result.success:
+        _mark_pool_job_applied(job.get("url", ""))
     return {"success": result.success, "message": result.message}
 
 

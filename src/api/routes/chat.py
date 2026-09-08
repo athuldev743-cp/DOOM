@@ -111,12 +111,13 @@ async def send_email_job(payload: dict):
     return email_only_for_job(payload.get("index"))
     
 
-@router.post("/api/apply-all-channels")
-async def apply_all_channels_endpoint():
-    from src.tools.registry import get_tool
-    tool = get_tool("apply_all_channels")
-    result = tool.run()
-    return {"result": result}    
+@router.post("/api/send-email-all")
+async def send_email_all():
+    from src.tools.jobs_tool import JobSearchTool
+    from src.tools.auto_apply_tool import BulkApplyTool
+    JobSearchTool().run()  # ensures latest_job_search reflects the current pool
+    result = BulkApplyTool().run()
+    return {"result": result.message, "success": result.success}
 
 
 @router.post("/speak")
