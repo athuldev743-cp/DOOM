@@ -29,10 +29,10 @@
       </div>
     </div>
     <div class="header-actions">
-      <div class="icon-btn" id="speak-btn" onclick="toggleSpeak()" title="Toggle voice">🔊</div>
-      <div class="icon-btn" onclick="getBriefing()" title="Daily Briefing">☀️</div>
-      <div class="icon-btn" onclick="toggleMemory()" title="Memory">🧠</div>
-      <div class="icon-btn" onclick="clearChat()" title="Clear">🗑</div>
+      <div class="icon-btn" id="speak-btn" title="Toggle voice">🔊</div>
+      <div class="icon-btn" title="Daily Briefing">☀️</div>
+      <div class="icon-btn" title="Memory">🧠</div>
+      <div class="icon-btn" title="Clear">🗑</div>
     </div>
   </div>
 
@@ -47,7 +47,7 @@
   <div class="upload-bar">
     <label class="upload-label">
       📎 upload document
-      <input type="file" id="file-upload" accept=".pdf,.txt,.md" style="display:none" onchange="uploadDoc(this)" />
+      <input type="file" id="file-upload" accept=".pdf,.txt,.md" style="display:none" />
     </label>
   </div>
 
@@ -74,7 +74,7 @@
 </div>
 
 <!-- MEMORY PANEL -->
-<div class="memory-panel" id="memory-panel" onclick="closeMemory(event)">
+<div class="memory-panel" id="memory-panel">
   <div class="memory-sheet">
     <div class="sheet-handle"></div>
     <div class="sheet-title">🧠 DOOM MEMORY</div>
@@ -83,14 +83,14 @@
 </div>
 
 <!-- JOB DETAIL MODAL -->
-<div class="job-modal-panel" id="job-modal" onclick="closeJobModal(event)">
+<div class="job-modal-panel" id="job-modal">
   <div class="job-modal-sheet">
     <div class="job-modal-header">
       <div>
         <h2 id="modal-job-title">Job Title</h2>
         <p id="modal-job-company">Company</p>
       </div>
-      <button class="job-modal-close" onclick="forceCloseJobModal()">✕</button>
+      <button class="job-modal-close" id="job-modal-close-btn">✕</button>
     </div>
     <div class="job-modal-body" id="modal-job-desc">
       Full job description will appear here...
@@ -105,7 +105,7 @@
 <div class="apply-progress-panel" id="apply-progress-panel">
   <div class="apply-progress-header">
     <span id="apply-progress-label">Applying 0/0</span>
-    <button class="job-modal-close" onclick="cancelApplyAll()">✕</button>
+    <button class="job-modal-close" id="apply-progress-close-btn">✕</button>
   </div>
   <div class="apply-progress-company" id="apply-progress-company">—</div>
   <div class="apply-progress-track">
@@ -113,6 +113,6 @@
   </div>
 </div>
 
-<script src="/static/script.js"></script>
+<script type="module" src="/static/js/main.js"></script>
 </body>
 </html>
