@@ -35,3 +35,4 @@ rich
 google-auth
 pyjwt
 pyautogui
+langgraph

@@ -6,6 +6,12 @@ profile = ProfileManager()
 
 EXTRACT_PROMPT = """You are a memory extractor. Analyze this conversation and extract any important facts about the user.
 
+EXISTING PROFILE KEYS — if a fact you're extracting updates,
+restates, or overlaps with something already tracked below, REUSE
+that exact key instead of inventing a new one. Only create a new
+key for a genuinely new fact with no existing match.
+{existing_keys}
+
 Extract facts like:
 - Personal info (name, location, age, relationships)
 - Career info (job, company, goals, interviews, salary expectations)
@@ -18,7 +24,7 @@ Conversation:
 {conversation}
 
 Respond ONLY with a JSON array of facts. Each fact has:
-- key: short snake_case identifier
+- key: an EXISTING key from the list above if it matches; otherwise a short new snake_case identifier
 - value: the fact
 - category: one of [personal, career, preference, event, contact, skill]
 
@@ -31,37 +37,52 @@ Example:
 If no important facts found, return empty array: []
 Only extract clear, specific facts. Do NOT extract generic conversation."""
 
+
+def _existing_keys_summary(max_chars: int = 3000) -> str:
+    """
+    Comma-joined list of existing profile keys (names only, no
+    values) so the extractor can match against them. Capped since
+    this itself becomes part of a prompt sent to the LLM fallback
+    chain — with 430+ keys, an unbounded list would recreate the
+    same size problem we just fixed elsewhere.
+    """
+    keys = sorted(profile.get_all().keys())
+    joined = ", ".join(keys)
+    return joined[:max_chars] if joined else "(none yet)"
+
+
 async def extract_and_save(user_message: str, assistant_message: str):
     try:
         conversation = f"User: {user_message}\nAssistant: {assistant_message}"
-        prompt = EXTRACT_PROMPT.format(conversation=conversation)
-        
+        prompt = EXTRACT_PROMPT.format(
+            conversation=conversation,
+            existing_keys=_existing_keys_summary(),
+        )
+
         response = await chat([
             {"role": "user", "content": prompt}
         ])
-        
-        # Parse JSON response
+
         import json
         import re
-        
-        # Extract JSON array from response
+
         match = re.search(r'\[.*\]', response, re.DOTALL)
         if not match:
             return
-            
+
         facts = json.loads(match.group())
-        
+
         if not facts:
             return
-            
+
         for fact in facts:
             key = fact.get('key', '').strip()
             value = fact.get('value', '').strip()
             category = fact.get('category', 'general').strip()
-            
+
             if key and value:
                 profile.set(key, value, category)
                 print(f"[Memory] Learned: {key} = {value}")
-                
+
     except Exception as e:
         print(f"[Memory] Extraction error: {e}")

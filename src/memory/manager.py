@@ -3,14 +3,18 @@ from src.memory.models import Conversation, Message, UserMemory
 from src.memory.database import SessionLocal
 import uuid
 
+
 class MemoryManager:
     def __init__(self, session_id: str = None):
         self.session_id = session_id or str(uuid.uuid4())
+        self._conversation_ensured = False
 
     def _get_db(self) -> Session:
         return SessionLocal()
 
     def ensure_conversation(self):
+        if self._conversation_ensured:
+            return
         db = self._get_db()
         try:
             conv = db.query(Conversation).filter_by(session_id=self.session_id).first()
@@ -18,6 +22,7 @@ class MemoryManager:
                 conv = Conversation(session_id=self.session_id)
                 db.add(conv)
                 db.commit()
+            self._conversation_ensured = True
         finally:
             db.close()
 
@@ -31,13 +36,27 @@ class MemoryManager:
         finally:
             db.close()
 
+    def save_messages(self, pairs: list[tuple[str, str]]):
+        """
+        Save multiple messages in one session/commit instead of one
+        round trip per message.
+        """
+        self.ensure_conversation()
+        db = self._get_db()
+        try:
+            for role, content in pairs:
+                db.add(Message(session_id=self.session_id, role=role, content=content))
+            db.commit()
+        finally:
+            db.close()
+
     def load_history(self, limit: int = 20) -> list:
         db = self._get_db()
         try:
             messages = (
                 db.query(Message)
                 .filter_by(session_id=self.session_id)
-                .order_by(Message.created_at.desc())
+                .order_by(Message.created_at.desc(), Message.id.desc())
                 .limit(limit)
                 .all()
             )
@@ -71,5 +90,13 @@ class MemoryManager:
         try:
             mems = db.query(UserMemory).all()
             return {m.key: m.value for m in mems}
+        finally:
+            db.close()
+
+    def clear_history(self):
+        db = self._get_db()
+        try:
+            db.query(Message).filter_by(session_id=self.session_id).delete()
+            db.commit()
         finally:
             db.close()

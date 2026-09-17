@@ -11,7 +11,11 @@ class OpenAICompatibleProvider(LLMProvider):
     def __init__(self, name: str, api_key_env: str, model_list: list[str],
                  base_url: str | None = None, default_timeout: int = 20):
         self.name = name
-        self._client = OpenAI(api_key=os.getenv(api_key_env) or "dummy", base_url=base_url)
+        self._client = OpenAI(
+            api_key=os.getenv(api_key_env) or "dummy",
+            base_url=base_url,
+            max_retries=0,  # our own fallback chain is the sole retry controller
+        )
         self._models = model_list
         self._default_timeout = default_timeout
 

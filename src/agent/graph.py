@@ -164,6 +164,41 @@ def _clean_response(response: str) -> str:
     return "\n".join(clean).strip()
 
 
+def _llm_messages(
+    messages: list[dict],
+    max_messages: int = 8,
+    max_chars: int = 20000,
+) -> list[dict]:
+    if not messages:
+        return []
+
+    system_message = messages[0]
+    current_user_message = messages[-1]
+    history = messages[1:-1]  # everything between system and the current turn
+
+    selected = []
+    total_chars = (
+        len(str(system_message.get("content", "")))
+        + len(str(current_user_message.get("content", "")))
+    )
+
+    for message in reversed(history):
+        message_chars = len(str(message.get("content", "")))
+
+        if len(selected) >= max_messages - 2:  # room for system + current user
+            break
+
+        if total_chars + message_chars > max_chars:
+            break
+
+        selected.append(message)
+        total_chars += message_chars
+
+    selected.reverse()
+
+    return [system_message] + selected + [current_user_message]
+
+
 # ---------------------------------------------------------------------------
 # NODES
 # ---------------------------------------------------------------------------
@@ -177,7 +212,21 @@ async def decide_node(state: AgentState) -> dict:
       - emit TOOL:/ARGS:
     """
 
-    response = await chat(state.messages)
+    llm_messages = _llm_messages(state.messages)
+
+    print(f"[DEBUG] messages={len(llm_messages)}")
+
+    for i, message in enumerate(llm_messages):
+     content = str(message.get("content", ""))
+     print(
+        f"[DEBUG] message[{i}] "
+        f"role={message.get('role')} "
+        f"chars={len(content)}"
+     )
+
+    response = await chat(llm_messages)
+
+
 
     print(f"[Graph] decide -> {response!r}")
 
@@ -361,52 +410,34 @@ async def call_tool_node(state: AgentState) -> dict:
     }
 
 
-async def format_response_node(state: AgentState) -> dict:
-    """
-    Convert a raw tool result into a concise user-facing response.
+JOB_TOOLS = {"job_search", "bulk_apply", "auto_apply"}
 
-    The LLM is explicitly instructed to use ONLY the tool result.
-    """
+async def format_response_node(state: AgentState) -> dict:
+    footer = (
+        "\n5. End with exactly:\n"
+        "'To apply to any of these: say apply for [role] at [company]'\n"
+        if state.tool_name in JOB_TOOLS
+        else ""
+    )
 
     instruction = {
         "role": "user",
         "content": (
-            f"Tool result:\n"
-            f"{state.tool_result_wire}\n\n"
-
+            f"Tool result:\n{state.tool_result_wire}\n\n"
             "STRICT INSTRUCTIONS:\n"
-
             "1. Present ONLY the information from the tool result above.\n"
-
-            "2. Do NOT add, invent, infer, or hallucinate any jobs, "
-            "companies, links, or details.\n"
-
-            "3. Do NOT say 'I applied' unless the tool result contains "
-            "'✅ Applied'.\n"
-
-            "4. If jobs are present, list them cleanly using only "
-            "the number, title, company if visible, and link.\n"
-
-            "5. End with exactly:\n"
-            "'To apply to any of these: say apply for [role] at [company]'\n"
-
+            "2. Do NOT add, invent, infer, or hallucinate any jobs, companies, links, or details.\n"
+            "3. Do NOT say 'I applied' unless the tool result contains '✅ Applied'.\n"
+            "4. If jobs are present, list them cleanly using only the number, title, company if visible, and link.\n"
+            f"{footer}"
             "6. Never show TOOL: or ARGS: in the response.\n"
-
             "7. Keep the response concise and factual.\n"
-
-            "8. Do not add commentary that is not present in the "
-            "tool result."
+            "8. Do not add commentary that is not present in the tool result."
         ),
     }
 
-    response = await chat(
-        state.messages + [instruction]
-    )
-
-    return {
-        "final_response": _clean_response(response)
-    }
-
+    response = await chat([instruction])
+    return {"final_response": _clean_response(response)}
 
 async def respond_node(state: AgentState) -> dict:
     """
@@ -440,13 +471,12 @@ async def respond_node(state: AgentState) -> dict:
 
 def route_after_decide(state: AgentState) -> str:
     """
-    Decide whether the LLM requested a valid registered tool.
-    """
+    Decide whether the LLM requested a tool.
 
-    if (
-        state.tool_name
-        and get_tool(state.tool_name)
-    ):
+    If a tool name was emitted, send it to validation.
+    The validation node checks whether the tool exists.
+    """
+    if state.tool_name:
         return "validate_args"
 
     return "respond"
