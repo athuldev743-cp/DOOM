@@ -36,3 +36,4 @@ google-auth
 pyjwt
 pyautogui
 langgraph
+psycopg
