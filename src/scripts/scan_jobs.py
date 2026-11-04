@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+import re
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -12,6 +13,25 @@ from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.tools.job_scoring import score_job
 
 MAX_POOL_SIZE = 50  # keep the rolling pool capped — trim lowest-scored when exceeded
+TARGET_MARKETS = [
+    ("de", "Germany"),
+    ("nl", "Netherlands"),
+    ("gb", "United Kingdom"),
+    ("ae", "United Arab Emirates"),
+    ("sg", "Singapore"),
+    ("in", "India"),
+]
+
+
+def _is_entry_level_target(job):
+    title = (job.get("title") or "").lower()
+    description = (job.get("description") or "").lower()
+    if re.search(r"\b(senior|staff|principal|lead|manager|director|head of)\b", title):
+        return False
+    required_years = re.findall(r"(\d+)\s*\+?\s*years?\s+(?:of\s+)?(?:experience|exp)", description)
+    if any(int(years) >= 2 for years in required_years):
+        return False
+    return True
 
 
 def run_scan():
@@ -46,32 +66,41 @@ def run_scan():
     new_count = 0
 
     try:
-        query = build_combined_query()  # nationwide — no location targeting
-        live_jobs = search_jobs(query, num_pages=1) or []
-        print(f"[Scan] JSearch returned {len(live_jobs)} jobs for '{query}'")
-
+        query = build_combined_query()
         now = datetime.utcnow()
-        for job in live_jobs:
-            url = job["url"]
-            if not url or url in existing_urls:
-                continue
-            existing_urls.add(url)
+        for country_code, market_name in TARGET_MARKETS:
+            live_jobs = search_jobs(query, num_pages=1, country=country_code) or []
+            print(f"[Scan] {market_name}: JSearch returned {len(live_jobs)} jobs.")
+            for job in live_jobs:
+                url = job["url"]
+                if not url or url in existing_urls:
+                    continue
+                existing_urls.add(url)
 
-            company = job["company"]
-            title = job["title"]
-            description = job["description"]
+                company = job["company"]
+                title = job["title"]
+                description = job["description"]
 
-            if _is_already_applied(company, title, applied_keys):
-                continue
+                if not _is_entry_level_target(job):
+                    continue
+                if _is_already_applied(company, title, applied_keys):
+                    continue
 
-            db.add(SeenUrl(url=url, first_seen=now))
-            db.add(DailyJobMatch(
-                url=url, title=title, company=company,
-                description=description, source=job["platform"],
-                score=score_job(title, description),
-                sent=False, applied=False,
-            ))
-            new_count += 1
+                location = job.get("location") or market_name
+                remote_label = "Yes" if job.get("is_remote") else "Not specified"
+                stored_description = (
+                    description
+                    + f"\n\n[Job Location: {location}; Remote: {remote_label}; Search Market: {market_name}]"
+                )
+
+                db.add(SeenUrl(url=url, first_seen=now))
+                db.add(DailyJobMatch(
+                    url=url, title=title, company=company,
+                    description=stored_description, source=job["platform"],
+                    score=score_job(title, description),
+                    sent=False, applied=False,
+                ))
+                new_count += 1
 
         db.commit()
         print(f"[Scan] Done. {new_count} new matches added.")
