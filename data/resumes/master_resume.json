@@ -1,0 +1,131 @@
+{
+  "name": "ATHUL DEV",
+  "headline": "AI & Backend Engineer | LLM Systems, Agentic Workflows & Full-Stack Python Delivery",
+  "location": "Kochi, Kerala, India",
+  "phone": "+91 7034306102",
+  "email": "athuldev743@gmail.com",
+  "portfolio": "https://port-folio-athul.vercel.app",
+  "github": "https://github.com/athuldev743-cp",
+  "linkedin": "https://linkedin.com/in/athul-dev-004891398",
+  "summary": "AI and Backend Engineer with one year of professional Software Engineering experience, building production LLM applications, agentic tool-calling systems, and scalable Python backends. Experienced across the full stack — from RAG pipelines and multi-provider LLM fallback infrastructure to async FastAPI services on PostgreSQL and MongoDB. Comfortable owning a system end-to-end: architecture, database design, API delivery, and reliability under real-world load and provider outages.",
+  "skills": [
+    {
+      "category": "AI & LLM Engineering",
+      "items": [
+        "LLM Agents & Tool-Calling Architectures",
+        "ReAct-Style Agent Orchestration",
+        "RAG (Retrieval-Augmented Generation)",
+        "Semantic Search",
+        "Vector DBs (ChromaDB)",
+        "SentenceTransformers",
+        "Multi-Provider LLM Fallback",
+        "Agent Frameworks (LangChain-familiar)",
+        "Prompt Engineering"
+      ]
+    },
+    {
+      "category": "Programming & Core",
+      "items": [
+        "Python (Asyncio)",
+        "SQL",
+        "Data Structures",
+        "Linux",
+        "Git"
+      ]
+    },
+    {
+      "category": "Backend & APIs",
+      "items": [
+        "FastAPI",
+        "RESTful APIs",
+        "WebSockets",
+        "Event-Driven Architecture",
+        "Microservices",
+        "Connection Pooling"
+      ]
+    },
+    {
+      "category": "Databases & Storage",
+      "items": [
+        "PostgreSQL (Neon, Aiven)",
+        "MongoDB (Motor, Beanie)",
+        "SQLite",
+        "Redis",
+        "asyncpg"
+      ]
+    },
+    {
+      "category": "Cloud & Automation",
+      "items": [
+        "FastAPI Cloud",
+        "APScheduler",
+        "QStash",
+        "Webhooks",
+        "Railway",
+        "Docker",
+        "Cloudflare Tunnels",
+        "Cloudinary CDN"
+      ]
+    },
+    {
+      "category": "Security & Reliability",
+      "items": [
+        "HMAC Verification",
+        "JWT / OAuth 2.0",
+        "Idempotent Handling",
+        "Load Testing (Locust)",
+        "Query Profiling (EXPLAIN ANALYZE)"
+      ]
+    }
+  ],
+  "experience": [
+    {
+      "role": "Software Engineer",
+      "company": "Oquilix",
+      "location": "Kochi, India",
+      "dates": "Jul 2025 – Jul 2026",
+      "bullets": [
+        "Architected production-grade FastAPI REST APIs for e-commerce inventory and order processing, supporting concurrent user sessions with async, non-blocking read/write database operations.",
+        "Built vector-based semantic search pipelines that cut manual data-retrieval effort for internal queries by replacing keyword lookup with embedding-based matching.",
+        "Improved system reliability under high-traffic load through async database architecture redesign and connection-level optimizations."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "DOOM — Autonomous AI Assistant",
+      "date": "Nov 2025",
+      "url": "https://doom-1a9d9743.fastapicloud.dev",
+      "bullets": [
+        "Architected a ReAct-style agent orchestrating 35 specialized tools for job discovery, email, WhatsApp, contacts, RAG, and automation, under strict tool-calling protocols with hallucination guardrails.",
+        "Achieved zero-downtime AI availability via a 4-provider, 14-model fallback chain (Gemini → OpenAI → Groq → OpenRouter), cleanly handling rate limits and provider outages.",
+        "Built a ChromaDB + SentenceTransformers RAG pipeline with overlap-aware chunking and deduplication; automated job-discovery and lead enrichment across Naukri, LinkedIn, Snov.io, and Gmail API."
+      ]
+    },
+    {
+      "name": "Neolix — B2B Sales Outreach Automation",
+      "date": "Feb 2026",
+      "url": "https://neolix-sage.vercel.app",
+      "bullets": [
+        "Built a 9-day, 3-channel (Email/WhatsApp/SMS) outreach cadence engine with AI copywriting via Groq Llama 3.3, dynamically routed by cost-latency tradeoff, plus Gmail API (OAuth 2.0) integration.",
+        "Cut median API latency 66% (2700ms → 920ms) by diagnosing connection-limit bottlenecks via Locust load testing and implementing asyncpg connection pooling; verified sub-millisecond GIN-indexed search over 1M+ profiles.",
+        "Resolved a cross-database bug where a query referenced a non-existent PostgreSQL table, replacing it with a correctly aligned MongoDB-backed lookup."
+      ]
+    },
+    {
+      "name": "Ekabhumi — End-to-End E-Commerce Platform",
+      "date": "Jul 2025",
+      "url": "https://ekabhumih.in",
+      "bullets": [
+        "Designed a three-layer payment verification system (client HMAC-SHA256, server-side Razorpay cross-check, separately-keyed webhooks) with idempotent processing to prevent duplicate order fulfillment.",
+        "Built Google OAuth 2.0 authentication issuing self-signed JWTs with server-side role assignment and silent token refresh."
+      ]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor of Computer Applications (BCA), University of Calicut — Computer Science",
+      "dates": "Oct 2022 – Mar 2025"
+    }
+  ]
+}
