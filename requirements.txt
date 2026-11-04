@@ -37,3 +37,4 @@ pyjwt
 pyautogui
 langgraph
 psycopg
+reportlab
