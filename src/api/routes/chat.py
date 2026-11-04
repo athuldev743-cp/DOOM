@@ -2,9 +2,9 @@ import json
 import os
 import asyncio
 import re
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Response, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest
+from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest, OpenJobRequest
 from src.api.deps import agent, get_current_identity, Identity, VISITOR_COOKIE_NAME
 from src.agent.core import Agent
 
@@ -127,25 +127,84 @@ async def tts_endpoint(request: ChatRequest):
     except Exception as e:
         return {"audio_url": None, "status": "error", "error": str(e)}
 
+@router.post("/api/jobs/open")
+async def open_job(payload: OpenJobRequest, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from datetime import datetime
+    from src.memory.database import SessionLocal, JobApplication
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
+        if application is None:
+            raise HTTPException(status_code=404, detail="Job application record not found")
+        if application.status not in ("discovered", "opened"):
+            raise HTTPException(status_code=409, detail=f"Cannot open job from status: {application.status}")
+        application.status = "opened"
+        application.opened_at = application.opened_at or datetime.utcnow()
+        db.commit()
+        return {"success": True, "apply_url": application.job_url, "status": application.status}
+    finally:
+        db.close()
+
+
+@router.post("/api/jobs/confirm-submitted")
+async def confirm_job_submitted(payload: OpenJobRequest, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from datetime import datetime
+    from src.memory.database import SessionLocal, JobApplication
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
+        if application is None:
+            raise HTTPException(status_code=404, detail="Job application record not found")
+        if application.status != "opened":
+            raise HTTPException(status_code=409, detail="Open the job first; only then can submission be confirmed")
+        application.status = "submitted"
+        application.submitted_at = datetime.utcnow()
+        db.commit()
+        return {"success": True, "status": application.status}
+    finally:
+        db.close()
+
+
+@router.get("/api/jobs/applications")
+async def list_job_applications(identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from src.memory.database import SessionLocal, JobApplication
+    db = SessionLocal()
+    try:
+        records = db.query(JobApplication).order_by(JobApplication.created_at.desc()).limit(100).all()
+        return {"applications": [{
+            "id": item.id, "job_id": item.job_id, "title": item.title,
+            "company": item.company, "job_url": item.job_url,
+            "status": item.status, "cv_path": item.cv_path,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "submitted_at": item.submitted_at.isoformat() if item.submitted_at else None,
+        } for item in records]}
+    finally:
+        db.close()
+
+
 @router.post("/api/apply-single-job")
-async def apply_single_job(payload: dict):
-    from src.tools.jobs_tool import apply_to_single_job
-    return apply_to_single_job(payload.get("index"))
+async def apply_single_job():
+    raise HTTPException(status_code=410, detail="Use the reviewed job-open and submission-confirmation workflow")
 
 
 @router.post("/api/send-email-job")
-async def send_email_job(payload: dict):
-    from src.tools.jobs_tool import email_only_for_job
-    return email_only_for_job(payload.get("index"))
-    
+async def send_email_job(identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    raise HTTPException(status_code=410, detail="Email applications are disabled until per-job CV approval is implemented")
+
 
 @router.post("/api/send-email-all")
-async def send_email_all():
-    from src.tools.jobs_tool import JobSearchTool
-    from src.tools.auto_apply_tool import BulkApplyTool
-    JobSearchTool().run()  # ensures latest_job_search reflects the current pool
-    result = BulkApplyTool().run()
-    return {"result": result.message, "success": result.success}
+async def send_email_all(identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    raise HTTPException(status_code=410, detail="Bulk application emails are disabled; each application requires individual approval")
 
 
 @router.post("/speak")
@@ -186,14 +245,10 @@ async def reset(identity: Identity = Depends(get_current_identity)):
     return {"status": "cleared"}
 
 @router.post("/api/apply-job")
-async def apply_job(request: ApplyJobRequest):
-    """Direct apply — bypasses the agent/LLM pipeline entirely for speed,
-    since the frontend already knows exactly which job and args to send."""
-    from src.tools.auto_apply_tool import AutoApplyTool
-    tool = AutoApplyTool()
-    result = tool.run(company=request.company, role=request.role, job_index=request.job_index)
-    success = not ("❌" in result or "error" in result.lower())
-    return {"result": result, "success": success}
+async def apply_job(identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    raise HTTPException(status_code=410, detail="Automatic sending is disabled; use the reviewed application workflow")
 
 
 @router.get("/api/stats/success-rate")
