@@ -53,6 +53,26 @@ The MCP layer is an adapter around the existing tools. The custom ReAct/LangGrap
 
 ---
 
+## Implementation metrics (configured)
+
+| Area | Current implementation |
+|---|---|
+| Registered internal tools | 26 |
+| MCP exposure | All 26 tools through one owner-authenticated Streamable HTTP server |
+| LLM providers | 4: Groq, Gemini, OpenAI, OpenRouter |
+| Configured model attempts | 18 across the four providers |
+| LLM fallback budget | 45 seconds overall by default |
+| Per-model timeout | 8 seconds by default |
+| Job discovery markets | 6 markets in rotation; 5 scanned per day |
+| Rolling job pool | Maximum 50 matches |
+| Application preparation | Maximum 5 pending review documents |
+| Generated CV retention | Completed application PDFs are cleared after 30 days |
+| RAG chunking | 500 words per chunk with 50-word overlap; top 3 results by default |
+
+These are implementation settings and capacity limits, not live performance measurements. Actual response latency must be measured from production traces after the FastAPI Cloud deployment is confirmed.
+
+---
+
 ## LLM observability (Langfuse)
 
 Every call through the fallback chain is traced — which provider/model actually served the response, per-attempt latency (including failed attempts before a successful fallback), and token usage/cost where the provider returns it. This turned "the fallback chain works" from a claim into something verifiable: a real rate-limit event was captured live during testing, showing Gemini failing with a 429, immediately falling through two more Gemini model variants, and eventually succeeding — with the full cascade timed and visible in the trace.
