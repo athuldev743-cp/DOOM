@@ -1,0 +1,39 @@
+name: Validate MCP adapter
+
+on:
+  push:
+    branches:
+      - feat/mcp-all-tools
+      - main
+    paths:
+      - "src/tools/mcp_server.py"
+      - "src/api/app.py"
+      - "tests/test_mcp_server_adapter.py"
+      - "requirements.txt"
+      - ".github/workflows/validate-mcp.yml"
+  pull_request:
+    paths:
+      - "src/tools/mcp_server.py"
+      - "src/api/app.py"
+      - "tests/test_mcp_server_adapter.py"
+      - "requirements.txt"
+      - ".github/workflows/validate-mcp.yml"
+
+jobs:
+  mcp-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install MCP SDK and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "mcp>=2.3,<3" "pydantic>=2"
+      - name: Compile MCP integration
+        run: |
+          python -m py_compile src/tools/mcp_server.py src/api/app.py
+      - name: Test tool registration, schema validation, and argument binding
+        run: |
+          python -m pytest -q tests/test_mcp_server_adapter.py
