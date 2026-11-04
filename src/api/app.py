@@ -11,7 +11,7 @@ from src.api.routes import (
     auth as auth_routes, leads, latency,
 )
 from src.memory.database import init_db
-from src.tools.mcp_server import mcp_server
+from src.tools.mcp_server import mcp_server, registered_mcp_tool_names
 from mcp.server.transport_security import TransportSecuritySettings
 
 
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
             print("[DOOM] Scheduler started")
             print(
                 f"[MCP] Streamable HTTP ready; "
-                f"{len(mcp_server._tool_manager.list_tools())} tools registered"
+                f"{len(registered_mcp_tool_names())} tools registered"
             )
             yield
         finally:
