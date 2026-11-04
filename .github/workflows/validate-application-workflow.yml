@@ -27,6 +27,7 @@ jobs:
       - name: Check Python syntax
         run: |
           python -m py_compile \
+            src/agent/graph.py \
             src/api/routes/chat.py \
             src/api/schemas.py \
             src/memory/database.py \
