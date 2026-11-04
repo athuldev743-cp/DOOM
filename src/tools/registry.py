@@ -15,8 +15,7 @@ from src.tools.contacts_tool import (
 
 from src.tools.email_tool import (
     ReadEmailsTool, SendEmailTool,
-    SendResumeEmailTool, SummarizeInboxTool,
-    SendEmailWithResumeTool
+    SummarizeInboxTool
 )
 
 from src.tools.jobs_tool import (
@@ -43,7 +42,6 @@ TOOLS = {
     "whatsapp_resume": WhatsAppResumeTool(),
     "read_emails": ReadEmailsTool(),
     "send_email": SendEmailTool(),
-    "send_resume_email": SendResumeEmailTool(),
     "summarize_inbox": SummarizeInboxTool(),
     "job_search": JobSearchTool(),
     "score_jd": ScoreJDTool(),
@@ -52,7 +50,6 @@ TOOLS = {
     "list_applications": ListApplicationsTool(),
     "daily_briefing": DailyBriefingTool(),
     "find_hr_email": FindHREmailTool(),
-    "send_email_resume": SendEmailWithResumeTool(),
      "save_lead": SaveLeadTool(),
    
     
