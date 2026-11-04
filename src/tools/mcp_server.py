@@ -20,6 +20,21 @@ def _tool_signature(tool):
     """
     schema = getattr(tool, "args_schema", None)
     if schema is not None:
+        run_signature = inspect.signature(tool.run)
+        run_parameters = set(run_signature.parameters)
+        schema_parameters = set(schema.model_fields)
+        unsupported = schema_parameters - run_parameters
+        required_missing = {
+            name for name, parameter in run_signature.parameters.items()
+            if parameter.default is inspect.Parameter.empty
+        } - schema_parameters
+        if unsupported or required_missing:
+            raise TypeError(
+                f"Invalid MCP schema for {tool.name or tool.__class__.__name__}: "
+                f"unsupported={sorted(unsupported)}, "
+                f"missing_required={sorted(required_missing)}"
+            )
+
         parameters = []
         annotations = {}
         for name, field in schema.model_fields.items():
