@@ -416,7 +416,6 @@ async def success_rate(identity: Identity = Depends(get_current_identity)):
     from src.memory.database import SessionLocal, JobApplication
     db = SessionLocal()
     try:
-        from sqlalchemy import or_
         attempted = db.query(JobApplication).filter(
             JobApplication.status.in_(("approved", "opened", "email_sent", "submitted"))
         ).count()
