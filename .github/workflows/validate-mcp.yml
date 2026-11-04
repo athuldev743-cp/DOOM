@@ -10,7 +10,7 @@ on:
       - "src/api/app.py"
       - "src/memory/database.py"
       - "src/agent/llm_fallback.py"
-      - "src/api/routes/latency.py src/api/routes/transcribe.py"
+      - "src/api/routes/latency.py"
       - "src/api/routes/transcribe.py"
       - "tests/test_llm_fallback.py"
       - "tests/test_mcp_server_adapter.py"
@@ -20,6 +20,11 @@ on:
     paths:
       - "src/tools/mcp_server.py"
       - "src/api/app.py"
+      - "src/memory/database.py"
+      - "src/agent/llm_fallback.py"
+      - "src/api/routes/latency.py"
+      - "src/api/routes/transcribe.py"
+      - "tests/test_llm_fallback.py"
       - "tests/test_mcp_server_adapter.py"
       - "requirements.txt"
       - ".github/workflows/validate-mcp.yml"
@@ -38,7 +43,7 @@ jobs:
           pip install "mcp>=2.3,<3" "pydantic>=2" pytest
       - name: Compile MCP integration
         run: |
-          python -m py_compile src/tools/mcp_server.py src/api/app.py src/memory/database.py src/agent/llm_fallback.py src/api/routes/latency.py
+          python -m py_compile src/tools/mcp_server.py src/api/app.py src/memory/database.py src/agent/llm_fallback.py src/api/routes/latency.py src/api/routes/transcribe.py
       - name: Verify all 26 registered tools are exposed by the MCP adapter
         run: |
           python - <<'PY'
