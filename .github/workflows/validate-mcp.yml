@@ -34,6 +34,25 @@ jobs:
       - name: Compile MCP integration
         run: |
           python -m py_compile src/tools/mcp_server.py src/api/app.py
+      - name: Verify all 26 registered tools are exposed by the MCP adapter
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          registry = ast.parse(Path("src/tools/registry.py").read_text())
+          assignment = next(
+              node for node in registry.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "TOOLS" for target in node.targets)
+          )
+          assert isinstance(assignment.value, ast.Dict)
+          names = [key.value for key in assignment.value.keys if isinstance(key, ast.Constant)]
+          assert len(names) == 26, f"Expected 26 tools, found {len(names)}"
+          adapter = Path("src/tools/mcp_server.py").read_text()
+          assert "for tool_name, tool_instance in TOOLS.items()" in adapter
+          print(f"Verified {len(names)} registry tools are passed to MCP registration.")
+          PY
       - name: Test tool registration, schema validation, and argument binding
         run: |
           python -m pytest -q tests/test_mcp_server_adapter.py
