@@ -125,7 +125,7 @@ class JobSearchTool(BaseTool):
                 if not pool_matches:
                     return ToolResult(
                         success=False,
-                        message="No jobs in the pool right now — the scanner runs several times a day, check back soon.",
+                        message="No new matches are available right now — the international scanner refreshes the pool daily.",
                     )
 
                 jobs = []
