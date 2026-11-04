@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, Column, String, Text, DateTime, Boolean, Integer, Index, LargeBinary
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, OperationalError
 
 load_dotenv()
 
@@ -149,8 +149,9 @@ def init_db():
     try:
         Base.metadata.create_all(bind=engine)
         print("[DB] Tables created successfully")
-    except ProgrammingError as e:
-        # Benign race: another process/worker created the same table/index
-        # between our existence-check and our CREATE statement. The schema
-        # is already in the state we wanted, so just log and move on.
+    except (ProgrammingError, OperationalError) as e:
+        # Benign race only: another worker may create the same table/index
+        # between SQLAlchemy's existence check and its CREATE statement.
+        if "already exists" not in str(e).lower():
+            raise
         print(f"[DB] create_all hit an already-exists race, continuing: {e}")
