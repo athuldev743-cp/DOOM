@@ -37,6 +37,22 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 ---
 
+## MCP integration
+
+DOOM now exposes its existing internal tool registry through one Model Context Protocol server using the official Python SDK and Streamable HTTP transport.
+
+- **Endpoint:** `/mcp` on the FastAPI application.
+- **Coverage:** all 26 tools are registered from `src/tools/registry.py`; the adapter does not duplicate tool business logic.
+- **Validation:** Pydantic argument schemas are reused where available. Tools without a Pydantic schema use their Python `run()` signature for required/allowed argument validation.
+- **Execution:** synchronous tools run in a worker thread so they do not block the ASGI event loop.
+- **Transport:** stateless Streamable HTTP, suitable for hosted deployments that may run multiple workers.
+- **Access control:** every MCP request requires the existing DOOM owner session, supplied as the `doom_session` cookie or a Bearer session token. Unauthenticated MCP requests are rejected.
+- **Host configuration:** set `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` when deploying behind a different hostname or custom domain.
+
+The MCP layer is an adapter around the existing tools. The custom ReAct/LangGraph agent continues to work as before; MCP support does not replace the current chat execution path.
+
+---
+
 ## LLM observability (Langfuse)
 
 Every call through the fallback chain is traced — which provider/model actually served the response, per-attempt latency (including failed attempts before a successful fallback), and token usage/cost where the provider returns it. This turned "the fallback chain works" from a claim into something verifiable: a real rate-limit event was captured live during testing, showing Gemini failing with a 429, immediately falling through two more Gemini model variants, and eventually succeeding — with the full cascade timed and visible in the trace.
@@ -122,11 +138,11 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 
 | Layer | Technology |
 |---|---|
-| Agent framework | Custom ReAct-style loop (no LangChain) |
+| Agent framework | Custom ReAct-style loop with LangGraph orchestration |
 | LLM providers | Gemini, OpenAI, Groq, OpenRouter (cascading fallback) |
 | RAG | ChromaDB, SentenceTransformers, PyMuPDF |
 | Memory | PostgreSQL (SQLAlchemy) |
-| API | FastAPI |
+| API / MCP transport | FastAPI, official MCP Python SDK v2, Streamable HTTP |
 | Observability | Langfuse (self-hosted via Docker + cloud) |
 | Voice | Speech-to-text + text-to-speech with local mp3 caching |
 | CLI | Rich (styled terminal interface) |
@@ -179,12 +195,12 @@ src/
 │   └── llm.py            # Multi-provider fallback chain
 ├── api/                  # FastAPI app + routes (chat, upload, transcribe, LinkedIn)
 ├── memory/
-│   ├── database.py       # SQLite conversation history
+│   ├── database.py       # PostgreSQL-backed application and memory data
 │   ├── manager.py        # Memory read/write orchestration
 │   ├── profile.py        # Persistent user profile store
 │   ├── extractor.py       # Background fact extraction from conversations
 │   └── rag.py              # ChromaDB ingestion + semantic search
-├── tools/                 # 26 registered tools + supporting implementation modules
+├── tools/                 # 26 registered tools + MCP adapter
 ├── voice/                  # STT/TTS
 └── scripts/                 # Scheduled jobs (morning digest, job scanning)
 ```
