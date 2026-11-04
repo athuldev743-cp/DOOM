@@ -87,7 +87,7 @@ export async function applySingleJob(index) {
     return true;
   } catch (e) {
     if (popup) popup.close();
-    if (btn) { btn.disabled = false; btn.textContent = 'Open Listing ↗'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Review Application'; }
     deps.addMessage('doom', 'Could not open job: ' + e.message);
     return false;
   }
