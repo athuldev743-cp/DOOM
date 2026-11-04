@@ -118,6 +118,7 @@ class JobSearchTool(BaseTool):
                 for i, m in enumerate(pool_matches):
                     jobs.append({
                         "id": f"job_{i}",
+                        "db_id": m.id,
                         "index": i,
                         "title": m.title,
                         "company": m.company,
