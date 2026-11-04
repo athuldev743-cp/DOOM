@@ -31,7 +31,7 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 - **Agent core**: a ReAct-style loop — the LLM decides whether to call a tool (`TOOL: name` / `ARGS: ...`) or answer directly, tool results get fed back for a final grounded response
 - **LLM layer**: cascading fallback across 4 providers, 14 total model attempts, so the assistant stays available even under rate limits or provider outages, with full call tracing via Langfuse (see below)
-- **Tool registry**: 35 tools across job search/applications, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
+- **Tool registry**: 26 active tools across job search, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
 - **Memory**: PostgreSQL (SQLAlchemy) for conversation history, user profile, and job data; injected into the system prompt on every turn
 - **Voice I/O**: speech-to-text input and text-to-speech output with local audio caching
 
