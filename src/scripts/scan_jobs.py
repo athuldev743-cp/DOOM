@@ -73,7 +73,7 @@ def run_scan():
         offset = datetime.utcnow().date().toordinal() % len(TARGET_MARKETS)
         markets_today = [TARGET_MARKETS[(offset + index) % len(TARGET_MARKETS)] for index in range(5)]
         for country_code, market_name in markets_today:
-            live_jobs = search_jobs(query, num_pages=1, country=country_code) or []
+            live_jobs = search_jobs(query, num_pages=1, date_posted="week", country=country_code) or []
             print(f"[Scan] {market_name}: JSearch returned {len(live_jobs)} jobs.")
             for job in live_jobs:
                 url = job["url"]
