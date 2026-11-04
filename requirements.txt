@@ -38,3 +38,4 @@ pyautogui
 langgraph
 psycopg
 reportlab
+mcp>=2.3,<3
