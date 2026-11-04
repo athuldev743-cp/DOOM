@@ -132,6 +132,7 @@ async def prepare_job(payload: PrepareJobRequest, identity: Identity = Depends(g
     if not identity.is_owner:
         raise HTTPException(status_code=403, detail="Owner authentication required")
     from datetime import datetime
+    from pathlib import Path
     from src.memory.database import SessionLocal, JobApplication
     from src.tools.resume_builder import generate_tailored_cv, generate_cover_letter
 
@@ -143,16 +144,21 @@ async def prepare_job(payload: PrepareJobRequest, identity: Identity = Depends(g
         if application.status in ("approved", "opened", "email_sent", "submitted"):
             raise HTTPException(status_code=409, detail="This application has already been approved or submitted")
         try:
-            cv_path = generate_tailored_cv(
+            generated_path = generate_tailored_cv(
                 application.id, application.title, application.company, application.description or ""
             )
+            generated_file = Path(__file__).resolve().parents[3] / generated_path
+            cv_content = generated_file.read_bytes()
+            cv_filename = generated_file.name
+            generated_file.unlink(missing_ok=True)
             cover_letter = generate_cover_letter(
                 application.title, application.company, application.description or ""
             )
         except Exception as exc:
             db.rollback()
             raise HTTPException(status_code=500, detail=f"Could not generate application documents: {str(exc)}")
-        application.cv_path = cv_path
+        application.cv_path = cv_filename
+        application.cv_content = cv_content
         application.cover_letter = cover_letter
         application.status = "prepared"
         application.prepared_at = datetime.utcnow()
@@ -173,22 +179,21 @@ async def prepare_job(payload: PrepareJobRequest, identity: Identity = Depends(g
 async def download_job_cv(job_id: int, identity: Identity = Depends(get_current_identity)):
     if not identity.is_owner:
         raise HTTPException(status_code=403, detail="Owner authentication required")
-    from pathlib import Path
     from src.memory.database import SessionLocal, JobApplication
-    from src.tools.resume_builder import generated_cv_path
 
     db = SessionLocal()
     try:
         application = db.query(JobApplication).filter_by(job_id=job_id).first()
-        if application is None or not application.cv_path:
+        if application is None or not application.cv_content or not application.cv_path:
             raise HTTPException(status_code=404, detail="Generated CV not found")
-        try:
-            cv_path = generated_cv_path(application.cv_path)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid generated CV path")
-        if not cv_path.is_file():
-            raise HTTPException(status_code=404, detail="Generated CV file is missing")
-        return FileResponse(str(cv_path), media_type="application/pdf", filename=cv_path.name)
+        filename = os.path.basename(application.cv_path)
+        if not filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Invalid generated CV filename")
+        return Response(
+            content=bytes(application.cv_content),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
     finally:
         db.close()
 
@@ -199,7 +204,7 @@ async def approve_job(payload: ApproveJobRequest, identity: Identity = Depends(g
         raise HTTPException(status_code=403, detail="Owner authentication required")
     from datetime import datetime
     from src.memory.database import SessionLocal, JobApplication
-    from src.tools.resume_builder import generated_cv_path, is_valid_recipient_email
+    from src.tools.resume_builder import is_valid_recipient_email
 
     db = SessionLocal()
     try:
@@ -208,11 +213,7 @@ async def approve_job(payload: ApproveJobRequest, identity: Identity = Depends(g
             raise HTTPException(status_code=404, detail="Job application record not found")
         if application.status != "prepared" or not application.cv_path or not application.cover_letter:
             raise HTTPException(status_code=409, detail="Prepare the CV and cover letter before approval")
-        try:
-            cv_path = generated_cv_path(application.cv_path)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid generated CV path")
-        if not cv_path.is_file():
+        if not application.cv_content or not application.cv_path or not application.cv_path.lower().endswith(".pdf"):
             raise HTTPException(status_code=404, detail="Generated CV file is missing")
         if payload.recipient_email:
             recipient = payload.recipient_email.strip()
@@ -255,7 +256,7 @@ async def send_application_email(payload: SendJobEmailRequest, identity: Identit
 
         subject = f"Application for {application.title} — Athul Dev"
         result = send_approved_application_email(
-            application.recipient_email, subject, application.cover_letter, application.cv_path
+            application.recipient_email, subject, application.cover_letter, application.cv_content, application.cv_path
         )
         if not result.success:
             raise HTTPException(status_code=502, detail=result.message)
