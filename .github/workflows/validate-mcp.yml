@@ -56,6 +56,20 @@ jobs:
           assert "for tool_name, tool_instance in TOOLS.items()" in adapter
           print(f"Verified {len(names)} registry tools are passed to MCP registration.")
           PY
+      - name: Install DOOM runtime dependencies
+        run: |
+          pip install -r requirements.txt
+      - name: Import and register the real DOOM tool registry
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-mcp-ci.db
+        run: |
+          python - <<'PY'
+          from src.tools.mcp_server import registered_mcp_tool_names
+          names = registered_mcp_tool_names()
+          assert len(names) == 26, f"Expected 26 MCP tools, found {len(names)}"
+          assert len(set(names)) == len(names), "Duplicate MCP tool names found"
+          print(f"Registered {len(names)} real DOOM tools: {', '.join(names)}")
+          PY
       - name: Test tool registration, schema validation, and argument binding
         run: |
           python -m pytest -q tests/test_mcp_server_adapter.py tests/test_llm_fallback.py
