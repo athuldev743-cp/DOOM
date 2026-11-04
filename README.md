@@ -1,6 +1,6 @@
 # DOOM — Personal AI Assistant
 
-DOOM is a full-stack, tool-using AI agent that automates real personal and career workflows — job search, applications, email, WhatsApp, contacts, reminders, PC automation, and document retrieval — through a single natural-language interface, with voice input/output and zero-downtime LLM availability via a four-provider fallback chain.
+DOOM is a full-stack, tool-using AI agent that automates real personal and career workflows — job search, applications, email, WhatsApp, contacts, reminders, PC automation, and document retrieval — through a single natural-language interface, with voice input/output, reviewed job applications, and multi-provider LLM fallback.
 
 **Live app:** https://doom-1a9d9743.fastapicloud.dev
 
@@ -16,7 +16,7 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 ```
 ┌──────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│  CLI / Voice  │────►│   Agent Core (ReAct)  │────►│  35-Tool Registry │
+│  CLI / Voice  │────►│   Agent Core (ReAct)  │────►│  26-Tool Registry │
 │  or Web API   │     │  src/agent/core.py    │     │  src/tools/       │
 └──────────────┘     └──────────┬────────────┘     └──────────────────┘
                                  │
