@@ -4,7 +4,7 @@ import asyncio
 import re
 from fastapi import APIRouter, Depends, Response, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
-from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest, OpenJobRequest
+from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest, OpenJobRequest, PrepareJobRequest, ApproveJobRequest, SendJobEmailRequest
 from src.api.deps import agent, get_current_identity, Identity, VISITOR_COOKIE_NAME
 from src.agent.core import Agent
 
@@ -127,20 +127,165 @@ async def tts_endpoint(request: ChatRequest):
     except Exception as e:
         return {"audio_url": None, "status": "error", "error": str(e)}
 
+@router.post("/api/jobs/prepare")
+async def prepare_job(payload: PrepareJobRequest, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from datetime import datetime
+    from src.memory.database import SessionLocal, JobApplication
+    from src.tools.resume_builder import generate_tailored_cv, generate_cover_letter
+
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
+        if application is None:
+            raise HTTPException(status_code=404, detail="Job application record not found")
+        if application.status in ("approved", "opened", "email_sent", "submitted"):
+            raise HTTPException(status_code=409, detail="This application has already been approved or submitted")
+        try:
+            cv_path = generate_tailored_cv(
+                application.id, application.title, application.company, application.description or ""
+            )
+            cover_letter = generate_cover_letter(
+                application.title, application.company, application.description or ""
+            )
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Could not generate application documents: {str(exc)}")
+        application.cv_path = cv_path
+        application.cover_letter = cover_letter
+        application.status = "prepared"
+        application.prepared_at = datetime.utcnow()
+        db.commit()
+        return {
+            "success": True,
+            "status": application.status,
+            "cv_url": f"/api/jobs/{application.job_id}/cv",
+            "cover_letter": application.cover_letter,
+            "title": application.title,
+            "company": application.company,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/api/jobs/{job_id}/cv")
+async def download_job_cv(job_id: int, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from pathlib import Path
+    from src.memory.database import SessionLocal, JobApplication
+    from src.tools.resume_builder import generated_cv_path
+
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=job_id).first()
+        if application is None or not application.cv_path:
+            raise HTTPException(status_code=404, detail="Generated CV not found")
+        try:
+            cv_path = generated_cv_path(application.cv_path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid generated CV path")
+        if not cv_path.is_file():
+            raise HTTPException(status_code=404, detail="Generated CV file is missing")
+        return FileResponse(str(cv_path), media_type="application/pdf", filename=cv_path.name)
+    finally:
+        db.close()
+
+
+@router.post("/api/jobs/approve")
+async def approve_job(payload: ApproveJobRequest, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from datetime import datetime
+    from src.memory.database import SessionLocal, JobApplication
+    from src.tools.resume_builder import generated_cv_path, is_valid_recipient_email
+
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
+        if application is None:
+            raise HTTPException(status_code=404, detail="Job application record not found")
+        if application.status != "prepared" or not application.cv_path or not application.cover_letter:
+            raise HTTPException(status_code=409, detail="Prepare the CV and cover letter before approval")
+        try:
+            cv_path = generated_cv_path(application.cv_path)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid generated CV path")
+        if not cv_path.is_file():
+            raise HTTPException(status_code=404, detail="Generated CV file is missing")
+        if payload.recipient_email:
+            recipient = payload.recipient_email.strip()
+            if not is_valid_recipient_email(recipient):
+                raise HTTPException(status_code=422, detail="Recipient email is invalid")
+            application.recipient_email = recipient
+        if payload.cover_letter is not None:
+            if not payload.cover_letter.strip():
+                raise HTTPException(status_code=422, detail="Cover letter cannot be empty")
+            application.cover_letter = payload.cover_letter.strip()
+        application.status = "approved"
+        application.approved_at = datetime.utcnow()
+        db.commit()
+        return {"success": True, "status": application.status, "recipient_email": application.recipient_email}
+    finally:
+        db.close()
+
+
+@router.post("/api/jobs/send-email")
+async def send_application_email(payload: SendJobEmailRequest, identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from datetime import datetime
+    from src.memory.database import SessionLocal, JobApplication
+    from src.tools.email_tool import send_approved_application_email
+
+    db = SessionLocal()
+    try:
+        application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
+        if application is None:
+            raise HTTPException(status_code=404, detail="Job application record not found")
+        if application.approved_at is None or application.status not in ("approved", "opened"):
+            raise HTTPException(status_code=409, detail="Approve this application before sending an email")
+        if application.email_sent_at is not None:
+            raise HTTPException(status_code=409, detail="Application email has already been sent")
+        if not application.recipient_email:
+            raise HTTPException(status_code=422, detail="Add and approve a recipient email first")
+        if not application.cv_path or not application.cover_letter:
+            raise HTTPException(status_code=409, detail="Approved CV and cover letter are required")
+
+        subject = f"Application for {application.title} — Athul Dev"
+        result = send_approved_application_email(
+            application.recipient_email, subject, application.cover_letter, application.cv_path
+        )
+        if not result.success:
+            raise HTTPException(status_code=502, detail=result.message)
+        application.status = "email_sent"
+        application.email_sent_at = datetime.utcnow()
+        db.commit()
+        return {"success": True, "status": application.status, "message": result.message}
+    finally:
+        db.close()
+
+
 @router.post("/api/jobs/open")
 async def open_job(payload: OpenJobRequest, identity: Identity = Depends(get_current_identity)):
     if not identity.is_owner:
         raise HTTPException(status_code=403, detail="Owner authentication required")
     from datetime import datetime
+    from urllib.parse import urlparse
     from src.memory.database import SessionLocal, JobApplication
     db = SessionLocal()
     try:
         application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
         if application is None:
             raise HTTPException(status_code=404, detail="Job application record not found")
-        if application.status not in ("discovered", "opened"):
-            raise HTTPException(status_code=409, detail=f"Cannot open job from status: {application.status}")
-        application.status = "opened"
+        if application.approved_at is None or application.status not in ("approved", "opened", "email_sent"):
+            raise HTTPException(status_code=409, detail="Prepare and approve this application before opening the listing")
+        parsed_url = urlparse(application.job_url or "")
+        if parsed_url.scheme != "https" or not parsed_url.netloc:
+            raise HTTPException(status_code=400, detail="Job listing URL is invalid")
+        if application.status == "approved":
+            application.status = "opened"
         application.opened_at = application.opened_at or datetime.utcnow()
         db.commit()
         return {"success": True, "apply_url": application.job_url, "status": application.status}
@@ -159,8 +304,10 @@ async def confirm_job_submitted(payload: OpenJobRequest, identity: Identity = De
         application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
         if application is None:
             raise HTTPException(status_code=404, detail="Job application record not found")
-        if application.status != "opened":
-            raise HTTPException(status_code=409, detail="Open the job first; only then can submission be confirmed")
+        if application.approved_at is None or application.opened_at is None:
+            raise HTTPException(status_code=409, detail="Approve and open the job listing before confirming submission")
+        if application.status == "submitted":
+            raise HTTPException(status_code=409, detail="Submission is already recorded")
         application.status = "submitted"
         application.submitted_at = datetime.utcnow()
         db.commit()
@@ -181,8 +328,12 @@ async def list_job_applications(identity: Identity = Depends(get_current_identit
             "id": item.id, "job_id": item.job_id, "title": item.title,
             "company": item.company, "job_url": item.job_url,
             "status": item.status, "cv_path": item.cv_path,
+            "recipient_email": item.recipient_email,
             "created_at": item.created_at.isoformat() if item.created_at else None,
+            "prepared_at": item.prepared_at.isoformat() if item.prepared_at else None,
+            "approved_at": item.approved_at.isoformat() if item.approved_at else None,
             "submitted_at": item.submitted_at.isoformat() if item.submitted_at else None,
+            "email_sent_at": item.email_sent_at.isoformat() if item.email_sent_at else None,
         } for item in records]}
     finally:
         db.close()
