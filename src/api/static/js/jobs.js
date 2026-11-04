@@ -44,7 +44,7 @@ export function renderJobCards(payload) {
       <div class="job-card" id="job-card-${idx}">
         <div class="job-card-title">${job.title}</div>
         <div class="job-card-company">${job.company}</div>
-        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${job.platform}</span></div>
+        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${job.location || job.market || "Location not specified"}${job.is_remote ? " · Remote" : ""} · ${job.platform}</span></div>
         <div class="job-card-snippet">${job.snippet || (job.description ? job.description.substring(0, 100) : '')}...</div>
         <div class="job-card-actions">
           <button class="btn-view" onclick="openJobModal(${idx})">📋 View Details</button>
