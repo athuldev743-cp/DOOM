@@ -128,15 +128,17 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 
 ## Tool categories
 
-| Category | Tools |
+| Category | Registered tools |
 |---|---|
 | Job search & applications | job_search, find_hr_email, cover_letter, score_jd, track_application, list_applications |
 | Email | read_emails, send_email, summarize_inbox |
-| WhatsApp | whatsapp_api_send, whatsapp_api_resume, whatsapp_broadcast, whatsapp_contact, whatsapp_resume |
+| WhatsApp | whatsapp_contact, whatsapp_resume |
 | Contacts & profile | call_contact, add_contact, list_contacts, set_profile, get_profile |
 | Documents / RAG | search_docs, ingest_docs, list_docs |
 | Productivity | save_reminder, list_reminders, daily_briefing, get_datetime |
-| System | automate (PC control), web_search, linkedin_profile |
+| System & web | automate, web_search |
+| Visitor leads | save_lead |
+
 
 ---
 
