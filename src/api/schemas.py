@@ -13,3 +13,6 @@ class ApplyJobRequest(BaseModel):
     role: str = ""
     job_index: int | None = None
     
+
+class OpenJobRequest(BaseModel):
+    job_id: int
