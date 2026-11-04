@@ -42,6 +42,32 @@ class DailyJobMatch(Base):
     )
 
 
+class JobApplication(Base):
+    """Persistent, owner-reviewed state for each discovered job."""
+    __tablename__ = "job_applications"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(Integer, unique=True, nullable=False, index=True)
+    job_url = Column(String(2048), unique=True, nullable=False)
+    title = Column(String(500), nullable=False)
+    company = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    source = Column(String(100), nullable=True)
+    status = Column(String(40), default="discovered", nullable=False)
+    cv_path = Column(String(2048), nullable=True)
+    cover_letter = Column(Text, nullable=True)
+    recipient_email = Column(String(320), nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    opened_at = Column(DateTime, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    email_sent_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_job_applications_status", "status"),
+    )
+
+
 class PlatformSession(Base):
     __tablename__ = "platform_sessions"
     platform = Column(String, primary_key=True)
