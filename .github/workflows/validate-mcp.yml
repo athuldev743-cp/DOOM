@@ -64,6 +64,10 @@ jobs:
           DATABASE_URL: sqlite:////tmp/doom-mcp-ci.db
         run: |
           python - <<'PY'
+          from src.memory.profile import UserProfile  # register user_profile model
+          from src.tools.reminder import Reminder  # register reminders model
+          from src.memory.database import init_db
+          init_db()
           from src.tools.mcp_server import registered_mcp_tool_names
           names = registered_mcp_tool_names()
           assert len(names) == 26, f"Expected 26 MCP tools, found {len(names)}"
