@@ -23,7 +23,7 @@ def load_master_resume():
         return json.load(handle)
 
 
-def _pdf__pdf_escape(value):
+def _pdf_escape(value):
     replacements = {"→": "->", "–": "-", "—": "-", "’": "'", "“": '"', "”": '"'}
     text = str(value or "")
     for old, new in replacements.items():
@@ -98,7 +98,7 @@ def _styles():
 
 
 def _section(story, title, styles):
-    story.append(Paragraph(escape(title.upper()), styles["section"]))
+    story.append(Paragraph(_pdf_escape(title.upper()), styles["section"]))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#94a3b8"),
                             spaceBefore=0, spaceAfter=3))
 
