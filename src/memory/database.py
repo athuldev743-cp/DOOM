@@ -61,6 +61,8 @@ class JobApplication(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     opened_at = Column(DateTime, nullable=True)
     submitted_at = Column(DateTime, nullable=True)
+    prepared_at = Column(DateTime, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
     email_sent_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
