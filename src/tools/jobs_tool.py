@@ -8,7 +8,7 @@ from src.tools.schemas import (
 from src.memory.profile import ProfileManager
 from datetime import datetime
 
-from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl
+from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl, JobApplication
 
 
 def _load_applied_keys(p: ProfileManager) -> set:
@@ -116,9 +116,19 @@ class JobSearchTool(BaseTool):
 
                 jobs = []
                 for i, m in enumerate(pool_matches):
+                    application = db.query(JobApplication).filter_by(job_id=m.id).first()
+                    if application is None:
+                        application = JobApplication(
+                            job_id=m.id, job_url=m.url, title=m.title or "",
+                            company=m.company or "", description=m.description or "",
+                            source=m.source, status="discovered",
+                        )
+                        db.add(application)
+                        db.flush()
                     jobs.append({
                         "id": f"job_{i}",
                         "db_id": m.id,
+                        "application_id": application.id,
                         "index": i,
                         "title": m.title,
                         "company": m.company,
