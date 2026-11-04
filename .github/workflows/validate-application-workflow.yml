@@ -35,6 +35,28 @@ jobs:
             src/tools/jobs_tool.py \
             src/tools/jsearch_client.py \
             src/tools/resume_builder.py
+      - name: Validate master resume and PDF generation
+        run: |
+          pip install reportlab
+          PYTHONPATH=. python - <<'PY'
+          from pathlib import Path
+          from src.tools.resume_builder import (
+              load_master_resume, generate_tailored_cv,
+              generate_cover_letter, is_valid_recipient_email,
+          )
+
+          resume = load_master_resume()
+          assert resume["experience"][0]["dates"] == "Jul 2025 – Jul 2026"
+          assert not any("Fitness" in project["name"] for project in resume["projects"])
+          letter = generate_cover_letter("AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG")
+          assert "Oquilix" in letter
+          assert "Instagram AI Content Agent" not in letter
+          assert is_valid_recipient_email("recruiter@example.com")
+          assert not is_valid_recipient_email("not-an-email")
+          generated = Path(generate_tailored_cv(99999, "AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG"))
+          assert generated.exists() and generated.stat().st_size > 1000
+          generated.unlink()
+          PY
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
