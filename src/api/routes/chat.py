@@ -237,7 +237,7 @@ async def send_application_email(payload: SendJobEmailRequest, identity: Identit
     if not identity.is_owner:
         raise HTTPException(status_code=403, detail="Owner authentication required")
     from datetime import datetime
-    from src.memory.database import SessionLocal, JobApplication
+    from src.memory.database import SessionLocal, JobApplication, DailyJobMatch
     from src.tools.email_tool import send_approved_application_email
 
     db = SessionLocal()
@@ -262,6 +262,9 @@ async def send_application_email(payload: SendJobEmailRequest, identity: Identit
             raise HTTPException(status_code=502, detail=result.message)
         application.status = "email_sent"
         application.email_sent_at = datetime.utcnow()
+        match = db.query(DailyJobMatch).filter_by(id=application.job_id).first()
+        if match:
+            match.applied = True
         db.commit()
         return {"success": True, "status": application.status, "message": result.message}
     finally:
@@ -299,7 +302,7 @@ async def confirm_job_submitted(payload: OpenJobRequest, identity: Identity = De
     if not identity.is_owner:
         raise HTTPException(status_code=403, detail="Owner authentication required")
     from datetime import datetime
-    from src.memory.database import SessionLocal, JobApplication
+    from src.memory.database import SessionLocal, JobApplication, DailyJobMatch
     db = SessionLocal()
     try:
         application = db.query(JobApplication).filter_by(job_id=payload.job_id).first()
@@ -311,6 +314,9 @@ async def confirm_job_submitted(payload: OpenJobRequest, identity: Identity = De
             raise HTTPException(status_code=409, detail="Submission is already recorded")
         application.status = "submitted"
         application.submitted_at = datetime.utcnow()
+        match = db.query(DailyJobMatch).filter_by(id=application.job_id).first()
+        if match:
+            match.applied = True
         db.commit()
         return {"success": True, "status": application.status}
     finally:
