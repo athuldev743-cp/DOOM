@@ -120,7 +120,7 @@ class JobSearchTool(BaseTool):
             try:
                 pool_matches = (
                     db.query(DailyJobMatch)
-                    .filter_by(applied=False)
+                    .filter_by(applied=False, sent=False)
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
@@ -144,6 +144,7 @@ class JobSearchTool(BaseTool):
                         )
                         db.add(application)
                         db.flush()
+                    m.sent = True
                     jobs.append({
                         "id": f"job_{i}",
                         "db_id": m.id,
@@ -335,21 +336,33 @@ class TrackApplicationTool(BaseTool):
 
 class ListApplicationsTool(BaseTool):
     name = "list_applications"
-    description = "List all tracked job applications"
+    description = "List applications stored in the reviewed application tracker"
     args_schema = ListApplicationsArgs
 
     def run(self) -> ToolResult:
+        db = SessionLocal()
         try:
-            p = ProfileManager()
-            existing = p.get("application_history")
-            if not existing:
+            records = db.query(JobApplication).order_by(JobApplication.created_at.desc()).limit(100).all()
+            if not records:
                 return ToolResult(success=True, message="No applications tracked yet.")
-            apps = json.loads(existing)
-            if not apps:
-                return ToolResult(success=True, message="No applications tracked yet.")
-            listing = f"📋 Job Applications ({len(apps)} total):\n\n" + "\n".join(
-                [f"• {a.get('role')} at {a.get('company')} ({a.get('status')})" for a in apps]
+            lines = [
+                f"• {item.title} at {item.company} — {item.status}"
+                for item in records
+            ]
+            data = [{
+                "job_id": item.job_id,
+                "title": item.title,
+                "company": item.company,
+                "status": item.status,
+                "job_url": item.job_url,
+                "cv_available": bool(item.cv_content),
+            } for item in records]
+            return ToolResult(
+                success=True,
+                message=f"📋 Job Applications ({len(records)} total):\n\n" + "\n".join(lines),
+                data={"applications": data},
             )
-            return ToolResult(success=True, message=listing, data={"applications": apps})
-        except Exception as e:
-            return ToolResult(success=False, message=f"List error: {str(e)}")
+        except Exception as exc:
+            return ToolResult(success=False, message=f"List error: {str(exc)}")
+        finally:
+            db.close()
