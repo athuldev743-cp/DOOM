@@ -82,7 +82,7 @@ HR_FALLBACK_RESPONSE = (
     "owner-only access for chat features.\n\n"
     "While I can't answer questions on his behalf here, this project "
     "demonstrates: a custom multi-provider LLM fallback chain across 4 "
-    "providers and 14 models, 35+ integrated tools spanning job search "
+    "providers and 14 models, 26 registered tools spanning job search "
     "automation, WhatsApp/email integration, and PC automation, a "
     "PostgreSQL-backed memory system, ChromaDB retrieval-augmented search, "
     "and full observability via Langfuse tracing.\n\n"
