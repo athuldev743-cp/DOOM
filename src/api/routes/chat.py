@@ -252,18 +252,15 @@ async def apply_job(identity: Identity = Depends(get_current_identity)):
 
 
 @router.get("/api/stats/success-rate")
-async def success_rate():
-    import json
-    from src.memory.profile import ProfileManager
-    p = ProfileManager()
-    history_raw = p.get("application_history") or "[]"
+async def success_rate(identity: Identity = Depends(get_current_identity)):
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    from src.memory.database import SessionLocal, JobApplication
+    db = SessionLocal()
     try:
-        records = json.loads(history_raw)
-    except Exception:
-        records = []
-
-    total = len(records)
-    applied = len([r for r in records if r.get("status") == "applied"])
-    rate = round((applied / total) * 100, 1) if total else 0
-
-    return {"total": total, "applied": applied, "failed": total - applied, "rate": rate}
+        total = db.query(JobApplication).count()
+        submitted = db.query(JobApplication).filter_by(status="submitted").count()
+        rate = round((submitted / total) * 100, 1) if total else 0
+        return {"total": total, "applied": submitted, "failed": total - submitted, "rate": rate}
+    finally:
+        db.close()
