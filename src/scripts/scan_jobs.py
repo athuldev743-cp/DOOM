@@ -80,6 +80,7 @@ def run_scan():
                 if not url or url in existing_urls:
                     continue
                 existing_urls.add(url)
+                db.add(SeenUrl(url=url, first_seen=now))
 
                 company = job["company"]
                 title = job["title"]
@@ -97,7 +98,6 @@ def run_scan():
                     + f"\n\n[Job Location: {location}; Remote: {remote_label}; Search Market: {market_name}]"
                 )
 
-                db.add(SeenUrl(url=url, first_seen=now))
                 db.add(DailyJobMatch(
                     url=url, title=title, company=company,
                     description=stored_description, source=job["platform"],
