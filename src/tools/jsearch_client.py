@@ -137,7 +137,7 @@ def search_jobs(query: str, num_pages: int = 1, date_posted: str = "all", countr
                 "description": description[:4000],
                 "snippet": description[:200],
                 "location": location,
-                "is_remote": bool(job.get("job_is_remote", False)),
+                "is_remote": job.get("job_is_remote") is True or str(job.get("job_is_remote", "")).lower() == "true",
                 "url": url,
                 "platform": platform,
                 "auto_apply": platform in AUTO_APPLY_PLATFORMS,
