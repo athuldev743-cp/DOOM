@@ -83,9 +83,20 @@ jobs:
           MCP_ALLOWED_ORIGINS: http://localhost
         run: |
           python - <<'PY'
+          import asyncio
+          import httpx
           from src.api.app import app
+
           assert app.title == "DOOM AI"
-          print("FastAPI app imported with MCP mounted.")
+
+          async def verify_mcp_auth():
+              transport = httpx.ASGITransport(app=app)
+              async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
+                  response = await client.post("/mcp", json={})
+                  assert response.status_code == 401, response.text
+
+          asyncio.run(verify_mcp_auth())
+          print("FastAPI app imported; unauthenticated MCP requests are rejected.")
           PY
       - name: Test tool registration, schema validation, and argument binding
         run: |
