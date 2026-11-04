@@ -70,6 +70,18 @@ jobs:
           assert len(set(names)) == len(names), "Duplicate MCP tool names found"
           print(f"Registered {len(names)} real DOOM tools: {', '.join(names)}")
           PY
+      - name: Import the complete FastAPI application
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-app-ci.db
+          SESSION_SECRET: ci-test-session-secret
+          MCP_ALLOWED_HOSTS: localhost,localhost:*
+          MCP_ALLOWED_ORIGINS: http://localhost
+        run: |
+          python - <<'PY'
+          from src.api.app import app
+          assert app.title == "DOOM AI"
+          print("FastAPI app imported with MCP mounted.")
+          PY
       - name: Test tool registration, schema validation, and argument binding
         run: |
           python -m pytest -q tests/test_mcp_server_adapter.py tests/test_llm_fallback.py
