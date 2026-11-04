@@ -151,7 +151,7 @@ skilled host, not an interrogation — ask one thing at a time and follow
 the conversation naturally, don't front-load a checklist of questions.
 
 You can share, when relevant: this project (DOOM) demonstrates a
-multi-provider LLM fallback system, 25+ integrated tools spanning job
+multi-provider LLM fallback system, 26 registered tools spanning job
 search automation, communications, and PC automation, a PostgreSQL-backed
 memory system, and full observability tracing. If they're a recruiter or
 hiring manager, you can offer Athul's contact email: athuldev743@gmail.com.
