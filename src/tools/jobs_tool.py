@@ -7,7 +7,7 @@ from src.tools.schemas import (
     TrackApplicationArgs, ListApplicationsArgs,
 )
 from src.memory.profile import ProfileManager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl, JobApplication
 
@@ -116,7 +116,10 @@ class JobSearchTool(BaseTool):
             try:
                 pool_matches = (
                     db.query(DailyJobMatch)
-                    .filter_by(applied=False)
+                    .filter(
+                        DailyJobMatch.applied.is_(False),
+                        DailyJobMatch.found_at >= datetime.utcnow() - timedelta(days=14),
+                    )
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
