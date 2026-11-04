@@ -30,7 +30,7 @@ jobs:
       - name: Install MCP SDK and test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install "mcp>=2.3,<3" "pydantic>=2"
+          pip install "mcp>=2.3,<3" "pydantic>=2" pytest
       - name: Compile MCP integration
         run: |
           python -m py_compile src/tools/mcp_server.py src/api/app.py
