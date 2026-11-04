@@ -1,33 +1,28 @@
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+
 from src.agent.core import Agent
+from src.api.deps import Identity, get_current_identity
 
 router = APIRouter(prefix="/test", tags=["Testing"])
 
 
 @router.get("/latency")
-async def test_latency():
-    agent = Agent()
+async def test_latency(identity: Identity = Depends(get_current_identity)):
+    # This endpoint triggers real LLM requests, so it must never be public.
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
 
-    # CALL 1 — cold
-    start = time.perf_counter()
-    response1 = await agent.chat("what time is it")
-    cold_time = time.perf_counter() - start
+    agent = Agent(session_id="latency-test", is_owner=True)
 
-    # CALL 2 — warm, same Agent/process
     start = time.perf_counter()
-    response2 = await agent.chat("what time is it")
-    warm_time = time.perf_counter() - start
+    response = await agent.chat("what time is it")
+    elapsed = time.perf_counter() - start
 
     return {
         "status": "success",
-        "cold": {
-            "latency_seconds": round(cold_time, 3),
-            "response": response1,
-        },
-        "warm": {
-            "latency_seconds": round(warm_time, 3),
-            "response": response2,
-        },
+        "latency_seconds": round(elapsed, 3),
+        "response": response,
+        "note": "Includes LLM provider selection and tool execution; not a pure API-server benchmark.",
     }
