@@ -87,6 +87,7 @@ export async function applySingleJob(index) {
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.detail || 'Could not open job');
     if (popup) popup.location.href = data.apply_url;
+    job.opened_at = true;
     if (btn) { btn.disabled = false; btn.textContent = 'Listing Opened ↗'; }
     const confirmBtn = document.getElementById('confirm-job-' + index);
     if (confirmBtn) confirmBtn.style.display = 'inline-block';
@@ -152,7 +153,7 @@ function showApplicationReview(index, data, approved = false) {
     recipient.readOnly = true;
     openButton.style.display = ['approved', 'opened', 'email_sent'].includes(currentStatus) ? 'inline-block' : 'none';
     sendButton.style.display = ['approved', 'opened'].includes(currentStatus) && !!(data.recipient_email || job.recipient_email) ? 'inline-block' : 'none';
-    confirmButton.style.display = (currentStatus === 'opened' || currentStatus === 'email_sent') ? 'inline-block' : 'none';
+    confirmButton.style.display = (currentStatus === 'opened' || (currentStatus === 'email_sent' && !!(data.opened_at || job.opened_at))) ? 'inline-block' : 'none';
     if (currentStatus === 'email_sent') status.textContent = 'Approved application email sent.';
     if (currentStatus === 'submitted') status.textContent = 'Platform submission confirmed.';
   } else {
@@ -194,6 +195,7 @@ function showApplicationReview(index, data, approved = false) {
     const opened = await applySingleJob(index);
     if (opened) {
       if (job.application_status !== 'email_sent') job.application_status = 'opened';
+      job.opened_at = true;
       status.textContent = 'Listing opened. Complete the application on the employer platform, then confirm below.';
       confirmButton.style.display = 'inline-block';
     }
