@@ -137,18 +137,17 @@ def get_gmail_service():
     return build('gmail', 'v1', credentials=creds)
 
 
-def send_approved_application_email(to: str, subject: str, body: str, attachment_path: str) -> ToolResult:
-    """Send only the already-approved, generated CV for one application."""
-    from src.tools.resume_builder import generated_cv_path, is_valid_recipient_email
+def send_approved_application_email(to: str, subject: str, body: str, attachment_content: bytes, filename: str) -> ToolResult:
+    """Send only the already-approved, generated CV stored on the application."""
+    from src.tools.resume_builder import is_valid_recipient_email
 
     clean_to = (to or "").strip()
+    safe_filename = os.path.basename(filename or "")
     if not is_valid_recipient_email(clean_to):
         return ToolResult(success=False, message="A valid recipient email is required.")
+    if not safe_filename.lower().endswith(".pdf") or not attachment_content:
+        return ToolResult(success=False, message="The approved CV PDF is missing or invalid.")
     try:
-        safe_path = generated_cv_path(attachment_path)
-        if not safe_path.is_file() or safe_path.suffix.lower() != ".pdf":
-            return ToolResult(success=False, message="The approved CV PDF is missing or invalid.")
-
         service = get_gmail_service()
         msg = MIMEMultipart("mixed")
         msg["To"] = clean_to
@@ -156,19 +155,17 @@ def send_approved_application_email(to: str, subject: str, body: str, attachment
         msg["Subject"] = subject
         msg.attach(MIMEText(body or "", "plain", "utf-8"))
 
-        with safe_path.open("rb") as handle:
-            part = MIMEBase("application", "pdf")
-            part.set_payload(handle.read())
+        part = MIMEBase("application", "pdf")
+        part.set_payload(bytes(attachment_content))
         encoders.encode_base64(part)
-        part.add_header("Content-Disposition", "attachment", filename=safe_path.name)
+        part.add_header("Content-Disposition", "attachment", filename=safe_filename)
         msg.attach(part)
 
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         service.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return ToolResult(success=True, message=f"Application email sent to {clean_to} with {safe_path.name} attached.")
+        return ToolResult(success=True, message=f"Application email sent to {clean_to} with {safe_filename} attached.")
     except Exception as exc:
         return ToolResult(success=False, message=f"Application email failed: {str(exc)}")
-
 
 class ReadEmailsTool(BaseTool):
     name = "read_emails"
