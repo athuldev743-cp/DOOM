@@ -23,6 +23,14 @@ def load_master_resume():
         return json.load(handle)
 
 
+def _pdf__pdf_escape(value):
+    replacements = {"→": "->", "–": "-", "—": "-", "’": "'", "“": '"', "”": '"'}
+    text = str(value or "")
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return escape(text)
+
+
 def _tokens(text):
     return set(re.findall(r"[a-z0-9+#.]+", (text or "").lower()))
 
