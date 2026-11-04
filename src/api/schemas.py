@@ -16,3 +16,17 @@ class ApplyJobRequest(BaseModel):
 
 class OpenJobRequest(BaseModel):
     job_id: int
+
+
+class PrepareJobRequest(BaseModel):
+    job_id: int
+
+
+class ApproveJobRequest(BaseModel):
+    job_id: int
+    recipient_email: str | None = None
+    cover_letter: str | None = None
+
+
+class SendJobEmailRequest(BaseModel):
+    job_id: int
