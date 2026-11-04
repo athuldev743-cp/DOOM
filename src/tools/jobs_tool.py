@@ -116,7 +116,7 @@ class JobSearchTool(BaseTool):
             try:
                 pool_matches = (
                     db.query(DailyJobMatch)
-                    .filter_by(applied=False, sent=False)
+                    .filter_by(applied=False)
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
@@ -140,7 +140,6 @@ class JobSearchTool(BaseTool):
                         )
                         db.add(application)
                         db.flush()
-                    m.sent = True
                     jobs.append({
                         "id": f"job_{i}",
                         "db_id": m.id,
@@ -247,7 +246,7 @@ def email_only_for_job(index: int) -> dict:
 
 class CoverLetterTool(BaseTool):
     name = "cover_letter"
-    description = "Generate a highly tailored LLM-driven application email mapping projects to the full job description."
+    description = "Generate a factual cover letter from the master resume, tailored by job requirements."
     args_schema = CoverLetterArgs
 
     @classmethod
