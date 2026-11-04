@@ -241,76 +241,11 @@ class CoverLetterTool(BaseTool):
 
     def run(self, company: str = "", role: str = "", jd: str = "") -> ToolResult:
         try:
-            p = ProfileManager()
-            name = p.get("name") or "Athul Dev"
-            portfolio = p.get("portfolio") or "https://port-folio-phpa.vercel.app"
-            github = p.get("github") or "https://github.com/athuldev743-cp"
-            email = p.get("email") or "athuldev743@gmail.com"
-            phone = p.get("phone") or "+91 70343 06102"
-            projects = p.get_projects()
-
-            try:
-                import google.generativeai as genai
-                api_key = os.getenv("GEMINI_API_KEY")
-                if api_key:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
-
-                    prompt = f"""You are an elite software developer career assistant writing a highly tailored job application email for {name}.
-
-Applicant Data:
-- Name: {name}
-- Email: {email}
-- Phone: {phone}
-- Links: Portfolio: {portfolio} | GitHub: {github}
-- Stored Project Knowledge:
-{json.dumps(projects, indent=2)}
-
-Target Application Details:
-- Target Company: {company if company else 'Hiring Team'}
-- Target Role: {role if role else 'Full Stack / AI Developer'}
-- Full Job Description Context:
-\"\"\"
-{jd if jd else 'Python, FastAPI, React, AI integrations, LLMs, WebSockets, Databases'}
-\"\"\"
-
-Formatting & Style Instructions:
-1. Carefully analyze the Job Description Context. Identify key required skills (e.g., Python, FastAPI, React, AI/LLMs, RAG, WebSockets, Databases).
-2. Directly map 2 to 3 relevant projects from {name}'s portfolio (DOOM AI Assistant, Instagram AI Agent, Ekabhumi) to those extracted requirements.
-3. Keep the tone professional, direct, and technical.
-4. Output structure:
-   - Salutation & compelling opening statement.
-   - Bulleted list of relevant projects showing technical impact matching the JD.
-   - Brief closing alignment statement.
-   - Clean professional signature ({name}, Email, Phone, Portfolio, GitHub).
-5. DO NOT include email subject lines, bracketed placeholders like [Date], or conversational fluff outside the email text.
-"""
-                    response = model.generate_content(prompt)
-                    if response and response.text:
-                        return ToolResult(success=True, message=response.text.strip())
-            except Exception as llm_err:
-                print(f"[CoverLetterTool] LLM generation failed, switching to dynamic fallback: {llm_err}")
-
-            fallback = f"""Dear Hiring Manager,
-
-I am writing to express my strong interest in the {role if role else 'Full Stack AI Developer'} position at {company if company else 'your company'}.
-
-As a Full Stack AI Developer specializing in Python, FastAPI, React, and autonomous AI systems, I build production-grade platforms that match your technical requirements:
-
-- DOOM AI Assistant: Autonomous AI agent featuring tool-calling, RAG, WebSockets, persistent memory (PostgreSQL/ChromaDB), and Gmail API automation.
-- Instagram AI Content Agent: Automated end-to-end media generation pipeline utilizing LLMs and the Instagram Graph API.
-- Ekabhumi E-Commerce: Scalable e-commerce application built with React, FastAPI, Docker, and dual payment gateway integration (Razorpay & Worldline).
-
-My background in high-throughput API architecture, vector databases, and full-stack engineering aligns directly with your engineering requirements.
-
-Best regards,
-{name}
-📧 {email} | 📱 {phone}
-🌐 Portfolio: {portfolio} | 💻 GitHub: {github}"""
-            return ToolResult(success=True, message=fallback)
-
-        except Exception as e:
-            return ToolResult(success=False, message=f"Cover letter generation error: {str(e)}")
+            from src.tools.resume_builder import generate_cover_letter
+            letter = generate_cover_letter(role or "Software Engineer", company or "your company", jd or "")
+            return ToolResult(success=True, message=letter)
+        except Exception as exc:
+            return ToolResult(success=False, message=f"Cover letter generation error: {str(exc)}")
 
 
 class ScoreJDTool(BaseTool):
