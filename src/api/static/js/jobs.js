@@ -187,7 +187,7 @@ function showApplicationReview(index, data, approved = false) {
   openButton.onclick = async () => {
     const opened = await applySingleJob(index);
     if (opened) {
-      job.application_status = 'opened';
+      if (job.application_status !== 'email_sent') job.application_status = 'opened';
       status.textContent = 'Listing opened. Complete the application on the employer platform, then confirm below.';
       confirmButton.style.display = 'inline-block';
     }
@@ -261,6 +261,7 @@ export async function confirmJobSubmitted(index) {
     const res = await fetch('/api/jobs/confirm-submitted', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.detail || 'Could not save status');
+    job.application_status = 'submitted';
     if (btn) { btn.textContent = '✓ Submitted'; btn.disabled = true; }
     const status = document.getElementById('review-status');
     if (status) status.textContent = 'Submission confirmed and saved.';
@@ -289,10 +290,10 @@ export function openJobModal(index) {
 
   const applyBtn = document.getElementById('modal-apply-btn');
   applyBtn.disabled = false;
-  applyBtn.textContent = 'Open Listing ↗';
+  applyBtn.textContent = 'Prepare CV & Review';
   applyBtn.onclick = () => {
     forceCloseJobModal();
-    applySingleJob(index);
+    prepareJobApplication(index);
   };
 
 
