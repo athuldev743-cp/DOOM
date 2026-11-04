@@ -12,6 +12,7 @@ on:
       - "src/tools/jobs_tool.py"
       - "src/tools/jsearch_client.py"
       - "src/tools/resume_builder.py"
+      - "src/tools/registry.py"
       - "data/resumes/master_resume.json"
       - "requirements.txt"
       - ".github/workflows/validate-application-workflow.yml"
@@ -36,7 +37,8 @@ jobs:
             src/tools/email_tool.py \
             src/tools/jobs_tool.py \
             src/tools/jsearch_client.py \
-            src/tools/resume_builder.py
+            src/tools/resume_builder.py \
+            src/tools/registry.py
       - name: Validate master resume and PDF generation
         run: |
           pip install reportlab
