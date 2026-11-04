@@ -410,15 +410,10 @@ async def call_tool_node(state: AgentState) -> dict:
     }
 
 
-JOB_TOOLS = {"job_search", "bulk_apply", "auto_apply"}
+JOB_TOOLS = set()
 
 async def format_response_node(state: AgentState) -> dict:
-    footer = (
-        "\n5. End with exactly:\n"
-        "'To apply to any of these: say apply for [role] at [company]'\n"
-        if state.tool_name in JOB_TOOLS
-        else ""
-    )
+    footer = ""
 
     instruction = {
         "role": "user",
