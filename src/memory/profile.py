@@ -151,3 +151,35 @@ class ProfileManager:
             return db.query(Contact).filter(Contact.name.ilike(f"%{name}%")).first()
         finally:
             db.close()
+
+    def list_contacts(self) -> str:
+        db = SessionLocal()
+        try:
+            contacts = (
+                db.query(Contact)
+                .order_by(Contact.created_at.desc())
+                .all()
+            )
+
+            if not contacts:
+                return "No contacts saved yet."
+
+            results = []
+            for contact in contacts:
+                details = [f"Name: {contact.name}"]
+
+                if contact.phone:
+                    details.append(f"Phone: {contact.phone}")
+                if contact.email:
+                    details.append(f"Email: {contact.email}")
+                if contact.relationship:
+                    details.append(f"Relationship: {contact.relationship}")
+                if contact.notes:
+                    details.append(f"Notes: {contact.notes}")
+
+                results.append(" | ".join(details))
+
+            return "\n".join(results)
+        finally:
+            db.close()
+
