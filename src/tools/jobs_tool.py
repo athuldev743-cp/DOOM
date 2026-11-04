@@ -100,7 +100,7 @@ def get_locations(p: ProfileManager) -> list:
 
 class JobSearchTool(BaseTool):
     name = "job_search"
-    description = "Show all currently open jobs in the pool (populated by the scheduled scanner) — no live search call, just reads what's already been found."
+    description = "Show the next 20 highest-scoring entry-level AI, automation and Python backend jobs from the international daily scan."
     args_schema = JobSearchArgs
 
     @classmethod
@@ -108,12 +108,8 @@ class JobSearchTool(BaseTool):
         return {"query": raw.strip()}
 
     def run(self, query: str = "", limit: int = 20) -> ToolResult:
-        """Serves the entire current job pool. The pool is built exclusively
-        by the scheduled scan_jobs.py scanner (6x/day) — this tool never
-        makes its own JSearch call, so 'find jobs' costs zero API quota no
-        matter how many times it's called. Jobs stay visible across repeated
-        calls until marked applied (via _mark_pool_job_applied) or dropped
-        by the scanner's score-based pool trim.
+        """Returns the next 20 unseen matches from the daily international scan.
+        This chat-facing tool never makes a live JSearch call.
         """
         try:
             db = SessionLocal()
@@ -356,6 +352,7 @@ class ListApplicationsTool(BaseTool):
                 "status": item.status,
                 "job_url": item.job_url,
                 "cv_available": bool(item.cv_content),
+                "cv_url": f"/api/jobs/{item.job_id}/cv" if item.cv_content else None,
             } for item in records]
             return ToolResult(
                 success=True,
