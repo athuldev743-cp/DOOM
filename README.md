@@ -60,7 +60,7 @@ Listings can still require local work authorization or relocation sponsorship. D
 
 ## Reviewed job application workflow
 
-Every discovered job receives a persistent JobApplication record. The owner can prepare a tailored CV and cover letter for an individual listing, download the PDF, edit the cover letter, and approve both documents before taking action.
+Every discovered job receives a persistent JobApplication record. The daily scanner pre-generates documents for up to five top-ranked recent jobs, while keeping no more than five applications pending review. The owner can download each PDF, edit the cover letter, and approve both documents before taking action.
 
 - data/resumes/master_resume.json is the factual source for CV generation. The job description only changes the ordering and emphasis of existing skills, experience bullets, and projects; it does not create new qualifications or achievements.
 - ReportLab generates an ATS-friendly PDF. The PDF bytes are stored on the matching application record in PostgreSQL, so they do not depend on ephemeral server storage.
