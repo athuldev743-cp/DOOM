@@ -135,9 +135,6 @@ class Visitor(Base):
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    __table_args__ = (
-        Index("ix_visitors_session_key", "session_key"),
-    )
 
 
 def get_db():
