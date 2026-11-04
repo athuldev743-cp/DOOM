@@ -104,7 +104,7 @@ def _section(story, title, styles):
 
 
 def _bullet(story, text, styles):
-    story.append(Paragraph("• " + escape(text), styles["bullet"]))
+    story.append(Paragraph("• " + _pdf_escape(text), styles["bullet"]))
 
 
 def generate_tailored_cv(application_id, job_title, company, job_description):
@@ -123,21 +123,21 @@ def generate_tailored_cv(application_id, job_title, company, job_description):
         author=resume["name"],
     )
     story = [
-        Paragraph(escape(resume["name"]), styles["name"]),
-        Paragraph(escape(resume["headline"]), styles["headline"]),
+        Paragraph(_pdf_escape(resume["name"]), styles["name"]),
+        Paragraph(_pdf_escape(resume["headline"]), styles["headline"]),
     ]
     contact = (
-        f"{escape(resume['location'])} | {escape(resume['phone'])} | "
-        f"{escape(resume['email'])} | "
-        f'<link href="{escape(resume["portfolio"])}" color="#2563eb">Portfolio</link> | '
-        f'<link href="{escape(resume["github"])}" color="#2563eb">GitHub</link> | '
-        f'<link href="{escape(resume["linkedin"])}" color="#2563eb">LinkedIn</link>'
+        f"{_pdf_escape(resume['location'])} | {_pdf_escape(resume['phone'])} | "
+        f"{_pdf_escape(resume['email'])} | "
+        f'<link href="{_pdf_escape(resume["portfolio"])}" color="#2563eb">Portfolio</link> | '
+        f'<link href="{_pdf_escape(resume["github"])}" color="#2563eb">GitHub</link> | '
+        f'<link href="{_pdf_escape(resume["linkedin"])}" color="#2563eb">LinkedIn</link>'
     )
     story.append(Paragraph(contact, styles["contact"]))
-    story.append(Paragraph(f"<b>Target:</b> {escape(job_title)} — {escape(company)}", styles["small"]))
+    story.append(Paragraph(f"<b>Target:</b> {_pdf_escape(job_title)} — {_pdf_escape(company)}", styles["small"]))
 
     _section(story, "Professional Summary", styles)
-    story.append(Paragraph(escape(resume["summary"]), styles["body"]))
+    story.append(Paragraph(_pdf_escape(resume["summary"]), styles["body"]))
 
     _section(story, "Technical Skills", styles)
     skill_groups = _ordered(
@@ -146,14 +146,14 @@ def generate_tailored_cv(application_id, job_title, company, job_description):
     for group in skill_groups:
         items = _ordered(group["items"], lambda item: item, job_text)
         story.append(Paragraph(
-            f"<b>{escape(group['category'])}:</b> {escape(', '.join(items))}", styles["small"]
+            f"<b>{_pdf_escape(group['category'])}:</b> {_pdf_escape(', '.join(items))}", styles["small"]
         ))
 
     _section(story, "Professional Experience", styles)
     for role in resume["experience"]:
         story.append(Paragraph(
-            f"<b>{escape(role['role'])} — {escape(role['company'])}</b>"
-            f" <font color='#64748b'>| {escape(role['dates'])} | {escape(role['location'])}</font>",
+            f"<b>{_pdf_escape(role['role'])} — {_pdf_escape(role['company'])}</b>"
+            f" <font color='#64748b'>| {_pdf_escape(role['dates'])} | {_pdf_escape(role['location'])}</font>",
             styles["body"],
         ))
         for item in _ordered(role["bullets"], lambda value: value, job_text):
@@ -166,19 +166,19 @@ def generate_tailored_cv(application_id, job_title, company, job_description):
     )
     for project in projects:
         title = (
-            f"<b>{escape(project['name'])}</b> "
-            f"<font color='#64748b'>| {escape(project['date'])}</font> "
-            f'<link href="{escape(project["url"])}" color="#2563eb">Project</link>'
+            f"<b>{_pdf_escape(project['name'])}</b> "
+            f"<font color='#64748b'>| {_pdf_escape(project['date'])}</font> "
+            f'<link href="{_pdf_escape(project["url"])}" color="#2563eb">Project</link>'
         )
         block = [Paragraph(title, styles["body"])]
         for item in _ordered(project["bullets"], lambda value: value, job_text):
-            block.append(Paragraph("• " + escape(item), styles["bullet"]))
+            block.append(Paragraph("• " + _pdf_escape(item), styles["bullet"]))
         story.append(KeepTogether(block))
 
     _section(story, "Education", styles)
     for item in resume["education"]:
         story.append(Paragraph(
-            f"<b>{escape(item['degree'])}</b> <font color='#64748b'>| {escape(item['dates'])}</font>",
+            f"<b>{_pdf_escape(item['degree'])}</b> <font color='#64748b'>| {_pdf_escape(item['dates'])}</font>",
             styles["body"],
         ))
 
