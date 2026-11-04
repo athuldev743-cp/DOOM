@@ -148,6 +148,7 @@ class JobSearchTool(BaseTool):
                         "cv_url": f"/api/jobs/{m.id}/cv" if application.cv_path else None,
                         "cover_letter": application.cover_letter,
                         "recipient_email": application.recipient_email,
+                        "opened_at": application.opened_at.isoformat() if application.opened_at else None,
                         "index": i,
                         "title": m.title,
                         "company": m.company,
