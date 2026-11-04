@@ -1,5 +1,6 @@
 import os
 import json
+import re
 from src.tools.base import BaseTool
 from src.tools.schemas import (
     ToolResult, JobSearchArgs, CoverLetterArgs, ScoreJDArgs,
@@ -60,6 +61,23 @@ def _mark_pool_job_applied(url: str) -> None:
         db.close()
 
 
+def _parse_job_metadata(description: str):
+    """Remove scanner metadata from the description and expose location fields."""
+    text = description or ""
+    match = re.search(
+        r"\n\n\[Job Location: (.*?); Remote: (.*?); Search Market: (.*?)\]\s*$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return text, "", False, ""
+    clean_description = text[:match.start()].rstrip()
+    location = match.group(1).strip()
+    is_remote = match.group(2).strip().lower() == "yes"
+    market = match.group(3).strip()
+    return clean_description, location, is_remote, market
+
+
 JOB_PLATFORMS = {
     "naukri": {"domain": "naukri.com", "auto_apply": True},
     "wellfound": {"domain": "wellfound.com", "auto_apply": True},
@@ -89,7 +107,7 @@ class JobSearchTool(BaseTool):
     def parse_args(cls, raw: str) -> dict:
         return {"query": raw.strip()}
 
-    def run(self, query: str = "", limit: int = 50) -> ToolResult:
+    def run(self, query: str = "", limit: int = 20) -> ToolResult:
         """Serves the entire current job pool. The pool is built exclusively
         by the scheduled scan_jobs.py scanner (6x/day) — this tool never
         makes its own JSearch call, so 'find jobs' costs zero API quota no
@@ -116,11 +134,12 @@ class JobSearchTool(BaseTool):
 
                 jobs = []
                 for i, m in enumerate(pool_matches):
+                    clean_description, location, is_remote, market = _parse_job_metadata(m.description or "")
                     application = db.query(JobApplication).filter_by(job_id=m.id).first()
                     if application is None:
                         application = JobApplication(
                             job_id=m.id, job_url=m.url, title=m.title or "",
-                            company=m.company or "", description=m.description or "",
+                            company=m.company or "", description=clean_description,
                             source=m.source, status="discovered",
                         )
                         db.add(application)
@@ -136,8 +155,11 @@ class JobSearchTool(BaseTool):
                         "index": i,
                         "title": m.title,
                         "company": m.company,
-                        "snippet": (m.description or "")[:200],
-                        "description": m.description or "",
+                        "snippet": clean_description[:200],
+                        "description": clean_description,
+                        "location": location,
+                        "is_remote": is_remote,
+                        "market": market,
                         "url": m.url,
                         "platform": m.source,
                         "auto_apply": JOB_PLATFORMS.get(m.source, {}).get("auto_apply", False),
