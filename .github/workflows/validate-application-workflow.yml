@@ -1,4 +1,5 @@
 name: Validate application workflow
+# Keep registry validation static so optional runtime integrations are not imported in CI.
 
 on:
   pull_request:
