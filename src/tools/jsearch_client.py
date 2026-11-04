@@ -12,9 +12,10 @@ MONTHLY_CALL_CAP = 200
 SAFETY_MARGIN = 20
 
 PRIORITY_ROLES = [
+    "AI Automation Engineer",
+    "AI Agent Developer",
     "AI Engineer",
-    "Python Developer",
-    "Software Engineer",
+    "Python Backend Engineer",
     "Backend Developer",
     "Full Stack Developer",
 ]
@@ -32,11 +33,10 @@ PUBLISHER_PLATFORM_MAP = {
 AUTO_APPLY_PLATFORMS = {"naukri", "wellfound"}
 
 
-def build_combined_query(location: str = "India") -> str:
-    """Defaults to nation-wide scope. A specific city can still be passed
-    in later if you want geographic targeting again."""
+def build_combined_query(location: str = "") -> str:
+    """Build a role-focused query; country targeting is passed separately."""
     roles_clause = " OR ".join(PRIORITY_ROLES)
-    return f"{roles_clause} in {location}"
+    return f"{roles_clause} {location}".strip()
 
 def detect_platform_from_publisher(publisher: str) -> str:
     publisher_lower = (publisher or "").lower()
@@ -127,11 +127,17 @@ def search_jobs(query: str, num_pages: int = 1, date_posted: str = "all", countr
                 continue
 
             platform = detect_platform_from_publisher(job.get("job_publisher", ""))
+            city = (job.get("job_city") or "").strip()
+            state = (job.get("job_state") or "").strip()
+            country_name = (job.get("job_country") or "").strip()
+            location = ", ".join(part for part in (city, state, country_name) if part)
             normalized.append({
                 "title": title,
                 "company": company,
                 "description": description[:4000],
                 "snippet": description[:200],
+                "location": location,
+                "is_remote": job.get("job_is_remote") is True or str(job.get("job_is_remote", "")).lower() == "true",
                 "url": url,
                 "platform": platform,
                 "auto_apply": platform in AUTO_APPLY_PLATFORMS,

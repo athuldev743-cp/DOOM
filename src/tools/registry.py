@@ -4,7 +4,7 @@ from src.tools.reminder import ReminderTool, ListRemindersTool
 from src.tools.automation import AutomationTool
 from src.tools.rag_tool import RAGSearchTool, IngestDocsTool, ListDocsTool
 from src.tools.briefing_tool import DailyBriefingTool
-from src.tools.auto_apply_tool import FindHREmailTool, AutoApplyTool, BulkApplyTool
+from src.tools.auto_apply_tool import FindHREmailTool
 from src.tools.visitor_tool import SaveLeadTool
 
 from src.tools.contacts_tool import (
@@ -15,8 +15,7 @@ from src.tools.contacts_tool import (
 
 from src.tools.email_tool import (
     ReadEmailsTool, SendEmailTool,
-    SendResumeEmailTool, SummarizeInboxTool,
-    SendEmailWithResumeTool
+    SummarizeInboxTool
 )
 
 from src.tools.jobs_tool import (
@@ -43,7 +42,6 @@ TOOLS = {
     "whatsapp_resume": WhatsAppResumeTool(),
     "read_emails": ReadEmailsTool(),
     "send_email": SendEmailTool(),
-    "send_resume_email": SendResumeEmailTool(),
     "summarize_inbox": SummarizeInboxTool(),
     "job_search": JobSearchTool(),
     "score_jd": ScoreJDTool(),
@@ -52,9 +50,6 @@ TOOLS = {
     "list_applications": ListApplicationsTool(),
     "daily_briefing": DailyBriefingTool(),
     "find_hr_email": FindHREmailTool(),
-    "auto_apply": AutoApplyTool(),
-    "bulk_apply": BulkApplyTool(),
-    "send_email_resume": SendEmailWithResumeTool(),
      "save_lead": SaveLeadTool(),
    
     

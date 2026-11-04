@@ -1,17 +1,118 @@
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, init_db
+from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, JobApplication, init_db
 from src.memory.profile import ProfileManager
-from src.tools.jobs_tool import _load_applied_keys, _is_already_applied
+from src.tools.jobs_tool import _load_applied_keys, _is_already_applied, _parse_job_metadata
 from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.tools.job_scoring import score_job
 
 MAX_POOL_SIZE = 50  # keep the rolling pool capped — trim lowest-scored when exceeded
+TARGET_MARKETS = [
+    ("de", "Germany"),
+    ("nl", "Netherlands"),
+    ("gb", "United Kingdom"),
+    ("ae", "United Arab Emirates"),
+    ("sg", "Singapore"),
+    ("in", "India"),
+]
+
+
+def _is_entry_level_target(job):
+    title = (job.get("title") or "").lower()
+    description = (job.get("description") or "").lower()
+    if re.search(r"\b(senior|staff|principal|lead|manager|director|head of)\b", title):
+        return False
+    required_years = re.findall(r"(\d+)\s*\+?\s*years?\s+(?:of\s+)?(?:experience|exp)", description)
+    if any(int(years) >= 2 for years in required_years):
+        return False
+    return True
+
+
+
+def prepare_top_applications(db, now):
+    """Prepare up to five top-ranked recent applications without sending or submitting."""
+    from src.tools.resume_builder import generate_tailored_cv, generate_cover_letter
+
+    active_count = db.query(JobApplication).filter(
+        JobApplication.status.in_(("prepared", "approved", "opened"))
+    ).count()
+    remaining = max(0, 5 - active_count)
+    if remaining == 0:
+        print("[Prepare] Five applications are already pending review; skipping pre-generation.")
+        return 0
+
+    cutoff = now - timedelta(days=7)
+    candidates = (
+        db.query(DailyJobMatch)
+        .filter(DailyJobMatch.applied.is_(False), DailyJobMatch.found_at >= cutoff)
+        .order_by(DailyJobMatch.score.desc())
+        .limit(20)
+        .all()
+    )
+
+    prepared_count = 0
+    for match in candidates:
+        if prepared_count >= remaining:
+            break
+
+        application = db.query(JobApplication).filter_by(job_id=match.id).first()
+        if application and application.status in ("prepared", "approved", "opened", "email_sent", "submitted"):
+            continue
+
+        clean_description, _, _, _ = _parse_job_metadata(match.description or "")
+        if application is None:
+            application = JobApplication(
+                job_id=match.id,
+                job_url=match.url,
+                title=match.title or "",
+                company=match.company or "",
+                description=clean_description,
+                source=match.source,
+                status="discovered",
+            )
+            db.add(application)
+            db.flush()
+
+        generated_path = None
+        try:
+            generated_path = generate_tailored_cv(
+                application.id,
+                application.title,
+                application.company,
+                application.description or clean_description,
+            )
+            generated_file = PROJECT_ROOT / generated_path
+            cv_content = generated_file.read_bytes()
+            cv_filename = generated_file.name
+            generated_file.unlink(missing_ok=True)
+            cover_letter = generate_cover_letter(
+                application.title,
+                application.company,
+                application.description or clean_description,
+            )
+
+            application.cv_path = cv_filename
+            application.cv_content = cv_content
+            application.cover_letter = cover_letter
+            application.status = "prepared"
+            application.prepared_at = now
+            db.commit()
+            prepared_count += 1
+            print(f"[Prepare] Prepared {application.title} at {application.company}.")
+        except Exception as exc:
+            db.rollback()
+            if generated_path:
+                orphan = PROJECT_ROOT / generated_path
+                orphan.unlink(missing_ok=True)
+            print(f"[Prepare] Could not prepare {match.title} at {match.company}: {exc}")
+
+    return prepared_count
 
 
 def run_scan():
@@ -20,36 +121,71 @@ def run_scan():
     p = ProfileManager()
     applied_keys = _load_applied_keys(p)
 
+    # Keep application history, but expire stored PDF bytes 30 days after
+    # a completed application. Active and pending applications are preserved.
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    expired_count = 0
+    for application in db.query(JobApplication).filter(JobApplication.cv_content.isnot(None)).all():
+        closed_dates = [value for value in (application.submitted_at, application.email_sent_at) if value]
+        if closed_dates and max(closed_dates) < cutoff:
+            application.cv_content = None
+            application.cv_path = None
+            expired_count += 1
+    if expired_count:
+        db.commit()
+        print(f"[Cleanup] Expired {expired_count} completed application PDFs older than 30 days.")
+
+    # Remove orphaned temporary PDFs left by interrupted generation.
+    temp_cv_dir = PROJECT_ROOT / "data" / "generated_cvs"
+    if temp_cv_dir.exists():
+        stale_before = datetime.utcnow() - timedelta(days=1)
+        for temp_file in temp_cv_dir.glob("*.pdf"):
+            if datetime.utcfromtimestamp(temp_file.stat().st_mtime) < stale_before:
+                temp_file.unlink(missing_ok=True)
+
     existing_urls = {u.url for u in db.query(SeenUrl.url).all()}
     new_count = 0
 
     try:
-        query = build_combined_query()  # nationwide — no location targeting
-        live_jobs = search_jobs(query, num_pages=1) or []
-        print(f"[Scan] JSearch returned {len(live_jobs)} jobs for '{query}'")
-
+        query = build_combined_query()
         now = datetime.utcnow()
-        for job in live_jobs:
-            url = job["url"]
-            if not url or url in existing_urls:
-                continue
-            existing_urls.add(url)
+        # Five market requests per day keeps a 200-call monthly quota safe;
+        # rotate through all six markets so each is refreshed regularly.
+        offset = datetime.utcnow().date().toordinal() % len(TARGET_MARKETS)
+        markets_today = [TARGET_MARKETS[(offset + index) % len(TARGET_MARKETS)] for index in range(5)]
+        for country_code, market_name in markets_today:
+            live_jobs = search_jobs(query, num_pages=1, date_posted="week", country=country_code) or []
+            print(f"[Scan] {market_name}: JSearch returned {len(live_jobs)} jobs.")
+            for job in live_jobs:
+                url = job["url"]
+                if not url or url in existing_urls:
+                    continue
+                existing_urls.add(url)
+                db.add(SeenUrl(url=url, first_seen=now))
 
-            company = job["company"]
-            title = job["title"]
-            description = job["description"]
+                company = job["company"]
+                title = job["title"]
+                description = job["description"]
 
-            if _is_already_applied(company, title, applied_keys):
-                continue
+                if not _is_entry_level_target(job):
+                    continue
+                if _is_already_applied(company, title, applied_keys):
+                    continue
 
-            db.add(SeenUrl(url=url, first_seen=now))
-            db.add(DailyJobMatch(
-                url=url, title=title, company=company,
-                description=description, source=job["platform"],
-                score=score_job(title, description),
-                sent=False, applied=False,
-            ))
-            new_count += 1
+                location = job.get("location") or market_name
+                remote_label = "Yes" if job.get("is_remote") else "Not specified"
+                stored_description = (
+                    description
+                    + f"\n\n[Job Location: {location}; Remote: {remote_label}; Search Market: {market_name}]"
+                )
+
+                db.add(DailyJobMatch(
+                    url=url, title=title, company=company,
+                    description=stored_description, source=job["platform"],
+                    score=score_job(title, description),
+                    sent=False, applied=False,
+                ))
+                new_count += 1
 
         db.commit()
         print(f"[Scan] Done. {new_count} new matches added.")
@@ -61,6 +197,9 @@ def run_scan():
                 db.delete(job)
             db.commit()
             print(f"[Scan] Pool exceeded {MAX_POOL_SIZE} — dropped {len(to_drop)} lowest-scored matches.")
+
+        prepared_count = prepare_top_applications(db, now)
+        print(f"[Prepare] {prepared_count} new applications prepared for owner review.")
 
     except Exception as e:
         db.rollback()

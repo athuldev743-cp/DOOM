@@ -1,10 +1,10 @@
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Boolean, Integer, Index
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Boolean, Integer, Index, LargeBinary
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, OperationalError
 
 load_dotenv()
 
@@ -39,6 +39,35 @@ class DailyJobMatch(Base):
 
     __table_args__ = (
         Index("ix_daily_job_matches_sent", "sent"),
+    )
+
+
+class JobApplication(Base):
+    """Persistent, owner-reviewed state for each discovered job."""
+    __tablename__ = "job_applications"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    job_id = Column(Integer, unique=True, nullable=False, index=True)
+    job_url = Column(String(2048), unique=True, nullable=False)
+    title = Column(String(500), nullable=False)
+    company = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    source = Column(String(100), nullable=True)
+    status = Column(String(40), default="discovered", nullable=False)
+    cv_path = Column(String(255), nullable=True)
+    cv_content = Column(LargeBinary, nullable=True)
+    cover_letter = Column(Text, nullable=True)
+    recipient_email = Column(String(320), nullable=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    opened_at = Column(DateTime, nullable=True)
+    submitted_at = Column(DateTime, nullable=True)
+    prepared_at = Column(DateTime, nullable=True)
+    approved_at = Column(DateTime, nullable=True)
+    email_sent_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_job_applications_status", "status"),
     )
 
 
@@ -106,9 +135,6 @@ class Visitor(Base):
     first_seen = Column(DateTime, default=datetime.utcnow)
     last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    __table_args__ = (
-        Index("ix_visitors_session_key", "session_key"),
-    )
 
 
 def get_db():
@@ -123,8 +149,9 @@ def init_db():
     try:
         Base.metadata.create_all(bind=engine)
         print("[DB] Tables created successfully")
-    except ProgrammingError as e:
-        # Benign race: another process/worker created the same table/index
-        # between our existence-check and our CREATE statement. The schema
-        # is already in the state we wanted, so just log and move on.
+    except (ProgrammingError, OperationalError) as e:
+        # Benign race only: another worker may create the same table/index
+        # between SQLAlchemy's existence check and its CREATE statement.
+        if "already exists" not in str(e).lower():
+            raise
         print(f"[DB] create_all hit an already-exists race, continuing: {e}")

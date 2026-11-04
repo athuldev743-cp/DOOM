@@ -1,0 +1,109 @@
+name: Validate MCP adapter
+
+on:
+  push:
+    branches:
+      - feat/mcp-all-tools
+      - main
+    paths:
+      - "src/tools/mcp_server.py"
+      - "src/api/app.py"
+      - "src/memory/database.py"
+      - "src/agent/llm_fallback.py"
+      - "src/api/routes/latency.py"
+      - "src/api/routes/transcribe.py"
+      - "tests/test_llm_fallback.py"
+      - "tests/test_mcp_server_adapter.py"
+      - "requirements.txt"
+      - ".github/workflows/validate-mcp.yml"
+  pull_request:
+    paths:
+      - "src/tools/mcp_server.py"
+      - "src/api/app.py"
+      - "src/memory/database.py"
+      - "src/agent/llm_fallback.py"
+      - "src/api/routes/latency.py"
+      - "src/api/routes/transcribe.py"
+      - "tests/test_llm_fallback.py"
+      - "tests/test_mcp_server_adapter.py"
+      - "requirements.txt"
+      - ".github/workflows/validate-mcp.yml"
+
+jobs:
+  mcp-adapter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install MCP SDK and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install "mcp>=2.3,<3" "pydantic>=2" pytest
+      - name: Compile MCP integration
+        run: |
+          python -m py_compile src/tools/mcp_server.py src/api/app.py src/memory/database.py src/agent/llm_fallback.py src/api/routes/latency.py src/api/routes/transcribe.py
+      - name: Verify all 26 registered tools are exposed by the MCP adapter
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          registry = ast.parse(Path("src/tools/registry.py").read_text())
+          assignment = next(
+              node for node in registry.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "TOOLS" for target in node.targets)
+          )
+          assert isinstance(assignment.value, ast.Dict)
+          names = [key.value for key in assignment.value.keys if isinstance(key, ast.Constant)]
+          assert len(names) == 26, f"Expected 26 tools, found {len(names)}"
+          adapter = Path("src/tools/mcp_server.py").read_text()
+          assert "for tool_name, tool_instance in TOOLS.items()" in adapter
+          print(f"Verified {len(names)} registry tools are passed to MCP registration.")
+          PY
+      - name: Install DOOM runtime dependencies
+        run: |
+          pip install -r requirements.txt
+      - name: Import and register the real DOOM tool registry
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-mcp-ci.db
+        run: |
+          python - <<'PY'
+          from src.memory.profile import UserProfile  # register user_profile model
+          from src.tools.reminder import Reminder  # register reminders model
+          from src.memory.database import init_db
+          init_db()
+          from src.tools.mcp_server import registered_mcp_tool_names
+          names = registered_mcp_tool_names()
+          assert len(names) == 26, f"Expected 26 MCP tools, found {len(names)}"
+          assert len(set(names)) == len(names), "Duplicate MCP tool names found"
+          print(f"Registered {len(names)} real DOOM tools: {', '.join(names)}")
+          PY
+      - name: Import the complete FastAPI application
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-app-ci.db
+          SESSION_SECRET: ci-test-session-secret
+          MCP_ALLOWED_HOSTS: localhost,localhost:*
+          MCP_ALLOWED_ORIGINS: http://localhost
+        run: |
+          python - <<'PY'
+          import asyncio
+          import httpx
+          from src.api.app import app
+
+          assert app.title == "DOOM AI"
+
+          async def verify_mcp_auth():
+              transport = httpx.ASGITransport(app=app)
+              async with httpx.AsyncClient(transport=transport, base_url="http://localhost") as client:
+                  response = await client.post("/mcp", json={})
+                  assert response.status_code == 401, response.text
+
+          asyncio.run(verify_mcp_auth())
+          print("FastAPI app imported; unauthenticated MCP requests are rejected.")
+          PY
+      - name: Test tool registration, schema validation, and argument binding
+        run: |
+          python -m pytest -q tests/test_mcp_server_adapter.py tests/test_llm_fallback.py

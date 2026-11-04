@@ -1,14 +1,15 @@
 import os
 import json
+import re
 from src.tools.base import BaseTool
 from src.tools.schemas import (
     ToolResult, JobSearchArgs, CoverLetterArgs, ScoreJDArgs,
     TrackApplicationArgs, ListApplicationsArgs,
 )
 from src.memory.profile import ProfileManager
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl
+from src.memory.database import SessionLocal, DailyJobMatch, SeenUrl, JobApplication
 
 
 def _load_applied_keys(p: ProfileManager) -> set:
@@ -60,6 +61,23 @@ def _mark_pool_job_applied(url: str) -> None:
         db.close()
 
 
+def _parse_job_metadata(description: str):
+    """Remove scanner metadata from the description and expose location fields."""
+    text = description or ""
+    match = re.search(
+        r"\n\n\[Job Location: (.*?); Remote: (.*?); Search Market: (.*?)\]\s*$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return text, "", False, ""
+    clean_description = text[:match.start()].rstrip()
+    location = match.group(1).strip()
+    is_remote = match.group(2).strip().lower() == "yes"
+    market = match.group(3).strip()
+    return clean_description, location, is_remote, market
+
+
 JOB_PLATFORMS = {
     "naukri": {"domain": "naukri.com", "auto_apply": True},
     "wellfound": {"domain": "wellfound.com", "auto_apply": True},
@@ -82,27 +100,26 @@ def get_locations(p: ProfileManager) -> list:
 
 class JobSearchTool(BaseTool):
     name = "job_search"
-    description = "Show all currently open jobs in the pool (populated by the scheduled scanner) — no live search call, just reads what's already been found."
+    description = "Show the next 20 highest-scoring entry-level AI, automation and Python backend jobs from the international daily scan."
     args_schema = JobSearchArgs
 
     @classmethod
     def parse_args(cls, raw: str) -> dict:
         return {"query": raw.strip()}
 
-    def run(self, query: str = "", limit: int = 50) -> ToolResult:
-        """Serves the entire current job pool. The pool is built exclusively
-        by the scheduled scan_jobs.py scanner (6x/day) — this tool never
-        makes its own JSearch call, so 'find jobs' costs zero API quota no
-        matter how many times it's called. Jobs stay visible across repeated
-        calls until marked applied (via _mark_pool_job_applied) or dropped
-        by the scanner's score-based pool trim.
+    def run(self, query: str = "", limit: int = 20) -> ToolResult:
+        """Returns the next 20 unseen matches from the daily international scan.
+        This chat-facing tool never makes a live JSearch call.
         """
         try:
             db = SessionLocal()
             try:
                 pool_matches = (
                     db.query(DailyJobMatch)
-                    .filter_by(applied=False)
+                    .filter(
+                        DailyJobMatch.applied.is_(False),
+                        DailyJobMatch.found_at >= datetime.utcnow() - timedelta(days=14),
+                    )
                     .order_by(DailyJobMatch.score.desc())
                     .limit(limit)
                     .all()
@@ -111,23 +128,46 @@ class JobSearchTool(BaseTool):
                 if not pool_matches:
                     return ToolResult(
                         success=False,
-                        message="No jobs in the pool right now — the scanner runs several times a day, check back soon.",
+                        message="No new matches are available right now — the international scanner refreshes the pool daily.",
                     )
 
                 jobs = []
                 for i, m in enumerate(pool_matches):
+                    clean_description, location, is_remote, market = _parse_job_metadata(m.description or "")
+                    application = db.query(JobApplication).filter_by(job_id=m.id).first()
+                    if application is None:
+                        application = JobApplication(
+                            job_id=m.id, job_url=m.url, title=m.title or "",
+                            company=m.company or "", description=clean_description,
+                            source=m.source, status="discovered",
+                        )
+                        db.add(application)
+                        db.flush()
                     jobs.append({
                         "id": f"job_{i}",
+                        "db_id": m.id,
+                        "application_id": application.id,
+                        "application_status": application.status,
+                        "cv_url": f"/api/jobs/{m.id}/cv" if application.cv_path else None,
+                        "cover_letter": application.cover_letter,
+                        "recipient_email": application.recipient_email,
+                        "opened_at": application.opened_at.isoformat() if application.opened_at else None,
                         "index": i,
                         "title": m.title,
                         "company": m.company,
-                        "snippet": (m.description or "")[:200],
-                        "description": m.description or "",
+                        "snippet": clean_description[:200],
+                        "description": clean_description,
+                        "location": location,
+                        "is_remote": is_remote,
+                        "market": market,
                         "url": m.url,
                         "platform": m.source,
                         "auto_apply": JOB_PLATFORMS.get(m.source, {}).get("auto_apply", False),
                         "score": m.score,
                     })
+
+                # Persist newly created application rows before closing the session.
+                db.commit()
 
                 p = ProfileManager()
                 p.set("latest_job_search", json.dumps(jobs), "career")
@@ -210,7 +250,7 @@ def email_only_for_job(index: int) -> dict:
 
 class CoverLetterTool(BaseTool):
     name = "cover_letter"
-    description = "Generate a highly tailored LLM-driven application email mapping projects to the full job description."
+    description = "Generate a factual cover letter from the master resume, tailored by job requirements."
     args_schema = CoverLetterArgs
 
     @classmethod
@@ -223,76 +263,11 @@ class CoverLetterTool(BaseTool):
 
     def run(self, company: str = "", role: str = "", jd: str = "") -> ToolResult:
         try:
-            p = ProfileManager()
-            name = p.get("name") or "Athul Dev"
-            portfolio = p.get("portfolio") or "https://port-folio-phpa.vercel.app"
-            github = p.get("github") or "https://github.com/athuldev743-cp"
-            email = p.get("email") or "athuldev743@gmail.com"
-            phone = p.get("phone") or "+91 70343 06102"
-            projects = p.get_projects()
-
-            try:
-                import google.generativeai as genai
-                api_key = os.getenv("GEMINI_API_KEY")
-                if api_key:
-                    genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
-
-                    prompt = f"""You are an elite software developer career assistant writing a highly tailored job application email for {name}.
-
-Applicant Data:
-- Name: {name}
-- Email: {email}
-- Phone: {phone}
-- Links: Portfolio: {portfolio} | GitHub: {github}
-- Stored Project Knowledge:
-{json.dumps(projects, indent=2)}
-
-Target Application Details:
-- Target Company: {company if company else 'Hiring Team'}
-- Target Role: {role if role else 'Full Stack / AI Developer'}
-- Full Job Description Context:
-\"\"\"
-{jd if jd else 'Python, FastAPI, React, AI integrations, LLMs, WebSockets, Databases'}
-\"\"\"
-
-Formatting & Style Instructions:
-1. Carefully analyze the Job Description Context. Identify key required skills (e.g., Python, FastAPI, React, AI/LLMs, RAG, WebSockets, Databases).
-2. Directly map 2 to 3 relevant projects from {name}'s portfolio (DOOM AI Assistant, Instagram AI Agent, Ekabhumi) to those extracted requirements.
-3. Keep the tone professional, direct, and technical.
-4. Output structure:
-   - Salutation & compelling opening statement.
-   - Bulleted list of relevant projects showing technical impact matching the JD.
-   - Brief closing alignment statement.
-   - Clean professional signature ({name}, Email, Phone, Portfolio, GitHub).
-5. DO NOT include email subject lines, bracketed placeholders like [Date], or conversational fluff outside the email text.
-"""
-                    response = model.generate_content(prompt)
-                    if response and response.text:
-                        return ToolResult(success=True, message=response.text.strip())
-            except Exception as llm_err:
-                print(f"[CoverLetterTool] LLM generation failed, switching to dynamic fallback: {llm_err}")
-
-            fallback = f"""Dear Hiring Manager,
-
-I am writing to express my strong interest in the {role if role else 'Full Stack AI Developer'} position at {company if company else 'your company'}.
-
-As a Full Stack AI Developer specializing in Python, FastAPI, React, and autonomous AI systems, I build production-grade platforms that match your technical requirements:
-
-- DOOM AI Assistant: Autonomous AI agent featuring tool-calling, RAG, WebSockets, persistent memory (PostgreSQL/ChromaDB), and Gmail API automation.
-- Instagram AI Content Agent: Automated end-to-end media generation pipeline utilizing LLMs and the Instagram Graph API.
-- Ekabhumi E-Commerce: Scalable e-commerce application built with React, FastAPI, Docker, and dual payment gateway integration (Razorpay & Worldline).
-
-My background in high-throughput API architecture, vector databases, and full-stack engineering aligns directly with your engineering requirements.
-
-Best regards,
-{name}
-📧 {email} | 📱 {phone}
-🌐 Portfolio: {portfolio} | 💻 GitHub: {github}"""
-            return ToolResult(success=True, message=fallback)
-
-        except Exception as e:
-            return ToolResult(success=False, message=f"Cover letter generation error: {str(e)}")
+            from src.tools.resume_builder import generate_cover_letter
+            letter = generate_cover_letter(role or "Software Engineer", company or "your company", jd or "")
+            return ToolResult(success=True, message=letter)
+        except Exception as exc:
+            return ToolResult(success=False, message=f"Cover letter generation error: {str(exc)}")
 
 
 class ScoreJDTool(BaseTool):
@@ -360,21 +335,34 @@ class TrackApplicationTool(BaseTool):
 
 class ListApplicationsTool(BaseTool):
     name = "list_applications"
-    description = "List all tracked job applications"
+    description = "List applications stored in the reviewed application tracker"
     args_schema = ListApplicationsArgs
 
     def run(self) -> ToolResult:
+        db = SessionLocal()
         try:
-            p = ProfileManager()
-            existing = p.get("application_history")
-            if not existing:
+            records = db.query(JobApplication).order_by(JobApplication.created_at.desc()).limit(100).all()
+            if not records:
                 return ToolResult(success=True, message="No applications tracked yet.")
-            apps = json.loads(existing)
-            if not apps:
-                return ToolResult(success=True, message="No applications tracked yet.")
-            listing = f"📋 Job Applications ({len(apps)} total):\n\n" + "\n".join(
-                [f"• {a.get('role')} at {a.get('company')} ({a.get('status')})" for a in apps]
+            lines = [
+                f"• {item.title} at {item.company} — {item.status}"
+                for item in records
+            ]
+            data = [{
+                "job_id": item.job_id,
+                "title": item.title,
+                "company": item.company,
+                "status": item.status,
+                "job_url": item.job_url,
+                "cv_available": bool(item.cv_content),
+                "cv_url": f"/api/jobs/{item.job_id}/cv" if item.cv_content else None,
+            } for item in records]
+            return ToolResult(
+                success=True,
+                message=f"📋 Job Applications ({len(records)} total):\n\n" + "\n".join(lines),
+                data={"applications": data},
             )
-            return ToolResult(success=True, message=listing, data={"applications": apps})
-        except Exception as e:
-            return ToolResult(success=False, message=f"List error: {str(e)}")
+        except Exception as exc:
+            return ToolResult(success=False, message=f"List error: {str(exc)}")
+        finally:
+            db.close()

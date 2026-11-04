@@ -137,6 +137,36 @@ def get_gmail_service():
     return build('gmail', 'v1', credentials=creds)
 
 
+def send_approved_application_email(to: str, subject: str, body: str, attachment_content: bytes, filename: str) -> ToolResult:
+    """Send only the already-approved, generated CV stored on the application."""
+    from src.tools.resume_builder import is_valid_recipient_email
+
+    clean_to = (to or "").strip()
+    safe_filename = os.path.basename(filename or "")
+    if not is_valid_recipient_email(clean_to):
+        return ToolResult(success=False, message="A valid recipient email is required.")
+    if not safe_filename.lower().endswith(".pdf") or not attachment_content:
+        return ToolResult(success=False, message="The approved CV PDF is missing or invalid.")
+    try:
+        service = get_gmail_service()
+        msg = MIMEMultipart("mixed")
+        msg["To"] = clean_to
+        msg["From"] = "athuldev743@gmail.com"
+        msg["Subject"] = " ".join(str(subject or "").splitlines())[:200]
+        msg.attach(MIMEText(body or "", "plain", "utf-8"))
+
+        part = MIMEBase("application", "pdf")
+        part.set_payload(bytes(attachment_content))
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename=safe_filename)
+        msg.attach(part)
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return ToolResult(success=True, message=f"Application email sent to {clean_to} with {safe_filename} attached.")
+    except Exception as exc:
+        return ToolResult(success=False, message=f"Application email failed: {str(exc)}")
+
 class ReadEmailsTool(BaseTool):
     name = "read_emails"
     description = "Read latest unread emails from Gmail"

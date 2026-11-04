@@ -1,12 +1,7 @@
 name: Job Scanner
 on:
   schedule:
-    - cron: "0 1 * * *"    # 6:30 AM IST
-    - cron: "0 4 * * *"    # 9:30 AM IST
-    - cron: "30 6 * * *"   # 12:00 PM IST
-    - cron: "0 10 * * *"   # 3:30 PM IST
-    - cron: "0 13 * * *"   # 6:30 PM IST
-    - cron: "0 16 * * *"   # 9:30 PM IST
+    - cron: "0 1 * * *"    # Daily 6:30 AM IST; five rotating market calls stay within the monthly API budget
   workflow_dispatch: {}
 
 jobs:

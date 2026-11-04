@@ -17,13 +17,19 @@ export function initJobs({ sendMessage, addMessage }) {
   deps = { sendMessage, addMessage };
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
 export function renderJobCards(payload) {
   const jobs = payload.jobs || payload; // supports old bare-array shape too, just in case
   const platformCounts = payload.platform_counts || {};
   loadedJobs = jobs;
 
   const countsLine = Object.entries(platformCounts)
-    .map(([plat, count]) => `${plat}: ${count}`)
+    .map(([plat, count]) => `${escapeHtml(plat)}: ${Number(count)}`)
     .join(' &nbsp;|&nbsp; ');
 
   let html = `
@@ -31,8 +37,7 @@ export function renderJobCards(payload) {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <span style="font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace;">${jobs.length} jobs found</span>
         <div style="display:flex;gap:6px;">
-          <button class="btn-view" id="email-all-btn" onclick="emailAllJobs()">Email All 📧</button>
-          <button class="btn-apply" id="apply-all-btn" onclick="applyToAll()">Apply All 🚀</button>
+          <span style="font-size:11px;color:var(--text-dim);">Apply individually</span>
         </div>
       </div>
       <div style="font-size:11px;color:var(--text-mid);font-family:'DM Mono',monospace;">${countsLine}</div>
@@ -43,13 +48,14 @@ export function renderJobCards(payload) {
   jobs.forEach((job, idx) => {
     html += `
       <div class="job-card" id="job-card-${idx}">
-        <div class="job-card-title">${job.title}</div>
-        <div class="job-card-company">${job.company}</div>
-        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${job.platform}</span></div>
-        <div class="job-card-snippet">${job.snippet || (job.description ? job.description.substring(0, 100) : '')}...</div>
+        <div class="job-card-title">${escapeHtml(job.title)}</div>
+        <div class="job-card-company">${escapeHtml(job.company)}</div>
+        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${escapeHtml(job.location || job.market || "Location not specified")}${job.is_remote ? " · Remote" : ""} · ${escapeHtml(job.platform)}</span></div>
+        <div class="job-card-snippet">${escapeHtml(job.snippet || (job.description ? job.description.substring(0, 100) : ''))}...</div>
         <div class="job-card-actions">
           <button class="btn-view" onclick="openJobModal(${idx})">📋 View Details</button>
-          <button class="btn-apply" onclick="applySingleJob(${idx})">Apply 🚀</button>
+          <button class="btn-apply" onclick="prepareJobApplication(${idx})">${job.application_status && job.application_status !== "discovered" ? "Review Application" : "Prepare CV"}</button>
+          <button class="btn-view" id="confirm-job-${idx}" style="display:none" onclick="confirmJobSubmitted(${idx})">Confirm Submitted</button>
         </div>
       </div>
     `;
@@ -72,32 +78,207 @@ export function removeJobCard(index) {
 
 export async function applySingleJob(index) {
   const job = loadedJobs[index];
-  if (!job) return;
-
-  const btn = document.querySelector(`#job-card-${index} .btn-apply`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
-
+  if (!job || !job.db_id) return false;
+  const btn = document.querySelector('#job-card-' + index + ' .btn-apply');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening...'; }
+  const popup = window.open('about:blank', '_blank');
   try {
-    const res = await fetch('/api/apply-single-job', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
-    });
+    const res = await fetch('/api/jobs/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
     const data = await res.json();
-
-    if (data.apply_url) {
-      window.open(data.apply_url, '_blank'); // manual platforms — open the real listing
-    }
-
-    if (data.success) {
-      removeJobCard(index);
-      updateSuccessRate();
-    } else if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Apply 🚀';
-    }
+    if (!res.ok || !data.success) throw new Error(data.detail || 'Could not open job');
+    if (popup) popup.location.href = data.apply_url;
+    job.opened_at = true;
+    if (btn) { btn.disabled = false; btn.textContent = 'Listing Opened ↗'; }
+    const confirmBtn = document.getElementById('confirm-job-' + index);
+    if (confirmBtn) confirmBtn.style.display = 'inline-block';
+    return true;
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Apply 🚀'; }
+    if (popup) popup.close();
+    if (btn) { btn.disabled = false; btn.textContent = 'Review Application'; }
+    deps.addMessage('doom', 'Could not open job: ' + e.message);
+    return false;
+  }
+}
+
+function showApplicationReview(index, data, approved = false) {
+  const job = loadedJobs[index];
+  if (!job) return;
+  const existing = document.getElementById('application-review-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'application-review-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:10050;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;';
+  overlay.innerHTML = [
+    '<section style="background:var(--panel,#111827);color:var(--text,#f8fafc);width:min(760px,96vw);max-height:90vh;overflow:auto;border:1px solid var(--border,#475569);border-radius:14px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.4);">',
+    '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;"><h3 style="margin:0;">Application review</h3><button id="review-close" class="btn-view" type="button">Close</button></div>',
+    '<p id="review-job-title" style="font-weight:600;margin:12px 0 2px;"></p><p id="review-company" style="opacity:.75;margin:0 0 12px;"></p>',
+    '<p style="margin:8px 0;"><a id="review-cv-link" target="_blank" rel="noopener noreferrer">Download tailored CV (PDF)</a></p>',
+    '<label for="review-cover-letter" style="display:block;margin:12px 0 5px;">Cover letter — review and edit before approval</label>',
+    '<textarea id="review-cover-letter" rows="12" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;background:var(--input-bg,#0f172a);color:inherit;border:1px solid var(--border,#475569);resize:vertical;"></textarea>',
+    '<label for="review-recipient" style="display:block;margin:12px 0 5px;">Recruiter email (optional; required only for email applications)</label>',
+    '<input id="review-recipient" type="email" placeholder="recruiter@company.com" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;background:var(--input-bg,#0f172a);color:inherit;border:1px solid var(--border,#475569);" />',
+    '<div id="review-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">',
+    '<button id="review-approve" class="btn-apply" type="button">Approve CV &amp; Cover Letter</button>',
+    '<button id="review-open" class="btn-view" type="button" style="display:none;">Open Original Listing</button>',
+    '<button id="review-send" class="btn-view" type="button" style="display:none;">Send Approved Email + CV</button>',
+    '<button id="review-confirm-submit" class="btn-view" type="button" style="display:none;">Confirm Submitted</button>',
+    '</div><p id="review-status" role="status" style="font-size:12px;opacity:.8;margin:12px 0 0;"></p></section>'
+  ].join('');
+  document.body.appendChild(overlay);
+
+  const title = overlay.querySelector('#review-job-title');
+  const company = overlay.querySelector('#review-company');
+  title.textContent = data.title || job.title || '';
+  company.textContent = data.company || job.company || '';
+  const cvLink = overlay.querySelector('#review-cv-link');
+  const cvUrl = data.cv_url || job.cv_url;
+  if (cvUrl) cvLink.href = cvUrl;
+  else cvLink.style.display = 'none';
+  const letter = overlay.querySelector('#review-cover-letter');
+  letter.value = data.cover_letter || job.cover_letter || '';
+  const recipient = overlay.querySelector('#review-recipient');
+  recipient.value = data.recipient_email || job.recipient_email || '';
+  const status = overlay.querySelector('#review-status');
+  status.textContent = data.status ? ('Status: ' + data.status) : 'Review both documents before approving.';
+  overlay.querySelector('#review-close').onclick = () => overlay.remove();
+
+  const approveButton = overlay.querySelector('#review-approve');
+  const openButton = overlay.querySelector('#review-open');
+  const sendButton = overlay.querySelector('#review-send');
+  const confirmButton = overlay.querySelector('#review-confirm-submit');
+  const currentStatus = data.status || job.application_status || 'prepared';
+
+  if (approved || ['approved', 'opened', 'email_sent', 'submitted'].includes(currentStatus)) {
+    approveButton.style.display = 'none';
+    letter.readOnly = true;
+    recipient.readOnly = true;
+    openButton.style.display = ['approved', 'opened', 'email_sent'].includes(currentStatus) ? 'inline-block' : 'none';
+    sendButton.style.display = ['approved', 'opened'].includes(currentStatus) && !!(data.recipient_email || job.recipient_email) ? 'inline-block' : 'none';
+    confirmButton.style.display = (currentStatus === 'opened' || (currentStatus === 'email_sent' && !!(data.opened_at || job.opened_at))) ? 'inline-block' : 'none';
+    if (currentStatus === 'email_sent') status.textContent = 'Approved application email sent.';
+    if (currentStatus === 'submitted') status.textContent = 'Platform submission confirmed.';
+  } else {
+    openButton.style.display = 'none';
+    sendButton.style.display = 'none';
+    confirmButton.style.display = 'none';
+  }
+
+  approveButton.onclick = async () => {
+    approveButton.disabled = true;
+    approveButton.textContent = 'Approving...';
+    try {
+      const response = await fetch('/api/jobs/approve', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          job_id: job.db_id,
+          cover_letter: letter.value,
+          recipient_email: recipient.value.trim() || null
+        })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.detail || 'Approval failed');
+      job.application_status = 'approved';
+      job.cover_letter = letter.value;
+      job.recipient_email = recipient.value.trim();
+      showApplicationReview(index, {
+        ...data, status: 'approved', cover_letter: letter.value,
+        recipient_email: recipient.value.trim(), cv_url: cvLink.href
+      }, true);
+    } catch (error) {
+      status.textContent = error.message;
+      approveButton.disabled = false;
+      approveButton.textContent = 'Approve CV & Cover Letter';
+    }
+  };
+
+  openButton.onclick = async () => {
+    const opened = await applySingleJob(index);
+    if (opened) {
+      if (job.application_status !== 'email_sent') job.application_status = 'opened';
+      job.opened_at = true;
+      status.textContent = 'Listing opened. Complete the application on the employer platform, then confirm below.';
+      confirmButton.style.display = 'inline-block';
+    }
+  };
+
+  sendButton.onclick = async () => {
+    if (!confirm('Send the approved cover letter with the tailored CV attached to ' + recipient.value + '?')) return;
+    sendButton.disabled = true;
+    sendButton.textContent = 'Sending...';
+    try {
+      const response = await fetch('/api/jobs/send-email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({job_id: job.db_id})
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.detail || 'Email sending failed');
+      job.application_status = 'email_sent';
+      status.textContent = 'Email sent successfully.';
+      sendButton.textContent = 'Email Sent';
+    } catch (error) {
+      status.textContent = error.message;
+      sendButton.disabled = false;
+      sendButton.textContent = 'Send Approved Email + CV';
+    }
+  };
+
+  confirmButton.onclick = () => confirmJobSubmitted(index);
+}
+
+export async function prepareJobApplication(index) {
+  const job = loadedJobs[index];
+  if (!job || !job.db_id) return;
+  if (job.application_status && job.application_status !== 'discovered') {
+    showApplicationReview(index, {
+      title: job.title, company: job.company,
+      status: job.application_status, cv_url: job.cv_url,
+      cover_letter: job.cover_letter, recipient_email: job.recipient_email
+    }, job.application_status !== 'prepared');
+    return;
+  }
+
+  const button = document.querySelector('#job-card-' + index + ' .btn-apply');
+  if (button) { button.disabled = true; button.textContent = 'Preparing...'; }
+  try {
+    const response = await fetch('/api/jobs/prepare', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({job_id: job.db_id})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.detail || 'CV preparation failed');
+    job.application_status = 'prepared';
+    job.cv_url = data.cv_url;
+    job.cover_letter = data.cover_letter;
+    showApplicationReview(index, data, false);
+    if (button) button.textContent = 'Review Application';
+  } catch (error) {
+    deps.addMessage('doom', 'Could not prepare application: ' + error.message);
+    if (button) { button.disabled = false; button.textContent = 'Prepare CV'; }
+  }
+}
+
+export async function confirmJobSubmitted(index) {
+  const job = loadedJobs[index];
+  if (!job || !job.db_id) return;
+  if (!confirm('Have you completed and submitted this application on the employer platform?')) return;
+  const btn = document.getElementById('review-confirm-submit') || document.getElementById('confirm-job-' + index);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const res = await fetch('/api/jobs/confirm-submitted', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.detail || 'Could not save status');
+    job.application_status = 'submitted';
+    if (btn) { btn.textContent = '✓ Submitted'; btn.disabled = true; }
+    const status = document.getElementById('review-status');
+    if (status) status.textContent = 'Submission confirmed and saved.';
+    updateSuccessRate();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Submitted'; }
+    deps.addMessage('doom', 'Could not confirm submission: ' + e.message);
   }
 }
 
@@ -119,24 +300,12 @@ export function openJobModal(index) {
 
   const applyBtn = document.getElementById('modal-apply-btn');
   applyBtn.disabled = false;
-  applyBtn.textContent = 'Apply Now 🚀';
+  applyBtn.textContent = 'Prepare CV & Review';
   applyBtn.onclick = () => {
     forceCloseJobModal();
-    applySingleJob(index);
+    prepareJobApplication(index);
   };
 
-  // Add/update the Send Email button — for after manually applying on the platform
-  let emailBtn = document.getElementById('modal-email-btn');
-  if (!emailBtn) {
-    emailBtn = document.createElement('button');
-    emailBtn.id = 'modal-email-btn';
-    emailBtn.className = 'btn-view';
-    emailBtn.style.marginRight = '8px';
-    document.querySelector('.job-modal-footer').prepend(emailBtn);
-  }
-  emailBtn.disabled = false;
-  emailBtn.textContent = '📧 Send Email';
-  emailBtn.onclick = () => sendEmailForJob(index);
 
   document.getElementById('job-modal').classList.add('open');
 }
@@ -355,5 +524,5 @@ export async function updateSuccessRate() {
 // file stays module-private.
 window.openJobModal = openJobModal;
 window.applySingleJob = applySingleJob;
-window.emailAllJobs = emailAllJobs;
-window.applyToAll = applyToAll;
+window.confirmJobSubmitted = confirmJobSubmitted;
+window.prepareJobApplication = prepareJobApplication;

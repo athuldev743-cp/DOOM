@@ -1,6 +1,6 @@
 # DOOM — Personal AI Assistant
 
-DOOM is a full-stack, tool-using AI agent that automates real personal and career workflows — job search, applications, email, WhatsApp, contacts, reminders, PC automation, and document retrieval — through a single natural-language interface, with voice input/output and zero-downtime LLM availability via a four-provider fallback chain.
+DOOM is a full-stack, tool-using AI agent that automates real personal and career workflows — job search, applications, email, WhatsApp, contacts, reminders, PC automation, and document retrieval — through a single natural-language interface, with voice input/output, reviewed job applications, and multi-provider LLM fallback.
 
 **Live app:** https://doom-1a9d9743.fastapicloud.dev
 
@@ -16,7 +16,7 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 ```
 ┌──────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│  CLI / Voice  │────►│   Agent Core (ReAct)  │────►│  35-Tool Registry │
+│  CLI / Voice  │────►│   Agent Core (ReAct)  │────►│  26-Tool Registry │
 │  or Web API   │     │  src/agent/core.py    │     │  src/tools/       │
 └──────────────┘     └──────────┬────────────┘     └──────────────────┘
                                  │
@@ -31,9 +31,45 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 - **Agent core**: a ReAct-style loop — the LLM decides whether to call a tool (`TOOL: name` / `ARGS: ...`) or answer directly, tool results get fed back for a final grounded response
 - **LLM layer**: cascading fallback across 4 providers, 14 total model attempts, so the assistant stays available even under rate limits or provider outages, with full call tracing via Langfuse (see below)
-- **Tool registry**: 35 tools across job search/applications, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
+- **Tool registry**: 26 active tools across job search, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
 - **Memory**: PostgreSQL (SQLAlchemy) for conversation history, user profile, and job data; injected into the system prompt on every turn
 - **Voice I/O**: speech-to-text input and text-to-speech output with local audio caching
+
+---
+
+## MCP integration
+
+DOOM now exposes its existing internal tool registry through one Model Context Protocol server using the official Python SDK and Streamable HTTP transport.
+
+- **Endpoint:** `/mcp` on the FastAPI application.
+- **Coverage:** all 26 tools are registered from `src/tools/registry.py`; the adapter does not duplicate tool business logic.
+- **Validation:** Pydantic argument schemas are reused where available. Tools without a Pydantic schema use their Python `run()` signature for required/allowed argument validation.
+- **Execution:** synchronous tools run in a worker thread so they do not block the ASGI event loop.
+- **Transport:** stateless Streamable HTTP, suitable for hosted deployments that may run multiple workers.
+- **Access control:** every MCP request requires the existing DOOM owner session, supplied as the `doom_session` cookie or a Bearer session token. Unauthenticated MCP requests are rejected.
+- **Host configuration:** set `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` when deploying behind a different hostname or custom domain.
+
+The MCP layer is an adapter around the existing tools. The custom ReAct/LangGraph agent continues to work as before; MCP support does not replace the current chat execution path.
+
+---
+
+## Implementation metrics (configured)
+
+| Area | Current implementation |
+|---|---|
+| Registered internal tools | 26 |
+| MCP exposure | All 26 tools through one owner-authenticated Streamable HTTP server |
+| LLM providers | 4: Groq, Gemini, OpenAI, OpenRouter |
+| Configured model attempts | 18 across the four providers |
+| LLM fallback budget | 45 seconds overall by default |
+| Per-model timeout | 8 seconds by default |
+| Job discovery markets | 6 markets in rotation; 5 scanned per day |
+| Rolling job pool | Maximum 50 matches |
+| Application preparation | Maximum 5 pending review documents |
+| Generated CV retention | Completed application PDFs are cleared after 30 days |
+| RAG chunking | 500 words per chunk with 50-word overlap; top 3 results by default |
+
+These are implementation settings and capacity limits, not live performance measurements. Actual response latency must be measured from production traces after the FastAPI Cloud deployment is confirmed.
 
 ---
 
@@ -47,35 +83,46 @@ Self-hosted via Docker Compose for local development, with a Langfuse Cloud opti
 
 ## Background job discovery pipeline
 
-Job search went through a real architecture correction worth documenting. The first version had the chat-triggered `job_search` tool perform a live, multi-platform search (Naukri, Wellfound, Indeed, LinkedIn) on every request — taking 20-30+ seconds and re-showing the same jobs on repeat searches, since nothing tracked what had already been surfaced.
+DOOM separates scheduled job discovery from chat delivery. The GitHub Actions scanner runs once daily and searches recent listings across Germany, the Netherlands, the United Kingdom, the UAE, Singapore, and India. Five markets are scanned per day in rotation to stay within the JSearch monthly API budget.
 
-**Root causes found and fixed:**
-- **Dead code**: two separate `JobSearchTool` implementations existed; only one was actually wired into the tool registry, making the other confusing/misleading to edit
-- **A broken conditional** silently defeated an existing optimization meant to skip live page-fetches for platforms known to block scraping (Naukri, Indeed) — every job was being fetched anyway, wasting time on requests that were essentially guaranteed to fail
-- **No persistence** — results were only cached as a single overwritten blob, with no record of what had already been shown
+- Searches AI Automation Engineer, AI Agent Developer, AI Engineer, Python Backend Engineer, Backend Developer, and Full Stack Developer roles.
+- Requests jobs posted within the last week and filters obvious senior titles and explicit requirements of two or more years of experience.
+- Deduplicates URLs with SeenUrl, scores listings against the stored skill profile, and keeps a capped rolling pool in DailyJobMatch.
+- The chat-facing job_search tool reads the highest-scoring 20 matches from PostgreSQL; it does not make live API calls.
 
-**The fix — separating discovery from delivery:**
-Rather than bolting dedup onto the live-search tool, the system now cleanly separates two responsibilities using tables that already existed in the schema but were unused (`SeenUrl`, `DailyJobMatch`):
-
-- **Discovery** (`src/scripts/scan_jobs.py`, run hourly via GitHub Actions): searches all 4 platforms, deduplicates against `SeenUrl`, scores each match, and stores results in `DailyJobMatch` with a `sent=False` flag
-- **Delivery** (the chat-facing `job_search` tool): reads the highest-scored unsent matches directly from the database and marks them delivered — no live search, no re-fetching, no repeats
-
-**Result**: chat responses went from 20-30+ seconds to near-instant, every response is guaranteed new (verified: asking twice in a row correctly returns "no new matches" the second time), and job matches are pre-scored against skill relevance before ever reaching the user.
+Listings can still require local work authorization or relocation sponsorship. DOOM displays the original listing and location/remote metadata; the applicant must verify eligibility with the employer.
 
 ---
 
+## Reviewed job application workflow
+
+Every discovered job receives a persistent JobApplication record. The daily scanner pre-generates documents for up to five top-ranked recent jobs, while keeping no more than five applications pending review. The owner can download each PDF, edit the cover letter, and approve both documents before taking action.
+
+- data/resumes/master_resume.json is the factual source for CV generation. The job description only changes the ordering and emphasis of existing skills, experience bullets, and projects; it does not create new qualifications or achievements.
+- ReportLab generates an ATS-friendly PDF. The PDF bytes are stored on the matching application record in PostgreSQL, so they do not depend on ephemeral server storage.
+- Email applications require a separate owner action after approval. The approved cover letter and that application's exact PDF are attached to the Gmail message.
+- Platform applications open the original job URL. The owner completes the application on the employer's platform and explicitly confirms submission in DOOM.
+- Automatic and bulk application tools are disabled. No application is submitted or emailed directly by the LLM.
+- A daily cleanup removes completed application PDFs after 30 days while retaining application history. Active and pending applications are preserved.
+
 ## The multi-LLM fallback chain
 
-This is the core reliability mechanism, and it's more aggressive than a simple two-way failover. On every chat call, DOOM attempts, in order:
+DOOM tries providers in the order configured in `src/agent/llm.py`:
 
-1. **Gemini** — 5 models tried in sequence (`gemini-2.5-flash` down through `gemini-1.5-flash`)
-2. **OpenAI GPT-5 Nano** — single fallback attempt if all Gemini models fail
-3. **Groq** — 4 models tried in sequence (`llama-3.3-70b-versatile` down to `gemma2-9b-it`)
-4. **OpenRouter** — 4 free-tier models as the final safety net (`nemotron-nano-9b`, `llama-3.3-70b-instruct`, `qwen3-4b`, `lfm-2.5-1.2b`)
+1. **Groq** — 6 configured model attempts
+2. **Gemini** — 5 configured model attempts
+3. **OpenAI** — 3 configured model attempts
+4. **OpenRouter** — 4 configured model attempts
 
-Each attempt is wrapped in its own try/except with a short timeout (15–30s), so a single hung request can't stall the whole chain. In the worst case, the system tries up to 14 different model endpoints before returning a graceful failure message — in practice this means the assistant has stayed responsive through real provider rate-limit and outage events during development.
+That is **18 configured model attempts across 4 providers**. These are fallback candidates, not a claim that every model is always available.
 
-**Design tradeoff worth noting**: this maximizes uptime but means response latency is unbounded in the worst case (a full walk through 14 failing endpoints). A production version of this would benefit from a circuit breaker or shorter per-tier timeout budget — noted in the roadmap.
+Latency is bounded by the fallback controller in `src/agent/llm_fallback.py`:
+- **45-second overall budget** by default (`LLM_TOTAL_TIMEOUT_SECONDS`).
+- **8-second per-model timeout** by default (`LLM_ATTEMPT_TIMEOUT_SECONDS`).
+- Provider calls run in worker threads, so a synchronous SDK request does not block FastAPI's event loop.
+- Langfuse records the serving provider/model, attempted-model count, elapsed time, and timeout-budget exhaustion.
+
+The timeouts are configurable through environment variables. The actual latency depends on provider response times and how quickly a usable model is reached; the configured limits are not measured latency claims.
 
 ---
 
@@ -93,23 +140,25 @@ Document retrieval for grounding responses in Athul's real documents (resume, pe
 
 ## Tool-calling discipline
 
-The system prompt encodes a strict protocol rather than relying on the model's native function-calling: exact `TOOL: name` / `ARGS: value` output format, explicit rules against hallucinating job listings or claiming an application was sent when it wasn't, and separation between "search-only" and "search-and-apply" intents (`job_search` vs. `bulk_apply`) so the agent can't accidentally take an action the user only meant to preview.
+The system prompt encodes a strict protocol rather than relying on the model's native function-calling: exact TOOL: name / ARGS: value output format, explicit rules against hallucinating job listings, and a separation between job discovery and application actions.
 
-After a tool runs, its raw result is fed back to the LLM with explicit formatting instructions — present only what the tool returned, never invent additional results — rather than letting the model freely narrate. A short list of tool result prefixes (`CALL:`, `WHATSAPP:`, `JOBS_DATA:`, `APPLY_REPORT:`, etc.) bypass this second LLM pass entirely and return directly, avoiding an unnecessary extra API call for actions that don't need reformatting.
+After a tool runs, its raw result is fed back to the LLM with explicit formatting instructions — present only what the tool returned, never invent additional results — rather than letting the model freely narrate. Application preparation, document approval, email sending, and platform submission are owner-authenticated API actions outside the LLM tool loop.
 
 ---
 
-## Tool categories (35 tools)
+## Tool categories
 
-| Category | Tools |
+| Category | Registered tools |
 |---|---|
-| Job search & applications | `job_search`, `naukri_search`, `naukri_scrape`, `linkedin_jobs`, `auto_apply`, `bulk_apply`, `find_hr_email`, `cover_letter`, `score_jd`, `track_application`, `list_applications` |
-| Email | `read_emails`, `send_email`, `send_resume_email`, `send_email_resume`, `summarize_inbox` |
-| WhatsApp | `whatsapp_api_send`, `whatsapp_api_resume`, `whatsapp_broadcast`, `whatsapp_contact`, `whatsapp_resume` |
-| Contacts & profile | `call_contact`, `add_contact`, `list_contacts`, `set_profile`, `get_profile` |
-| Documents / RAG | `search_docs`, `ingest_docs`, `list_docs` |
-| Productivity | `save_reminder`, `list_reminders`, `daily_briefing`, `get_datetime` |
-| System | `automate` (PC control), `web_search`, `linkedin_profile` |
+| Job search & applications | job_search, find_hr_email, cover_letter, score_jd, track_application, list_applications |
+| Email | read_emails, send_email, summarize_inbox |
+| WhatsApp | whatsapp_contact, whatsapp_resume |
+| Contacts & profile | call_contact, add_contact, list_contacts, set_profile, get_profile |
+| Documents / RAG | search_docs, ingest_docs, list_docs |
+| Productivity | save_reminder, list_reminders, daily_briefing, get_datetime |
+| System & web | automate, web_search |
+| Visitor leads | save_lead |
+
 
 ---
 
@@ -117,15 +166,16 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 
 | Layer | Technology |
 |---|---|
-| Agent framework | Custom ReAct-style loop (no LangChain) |
+| Agent framework | Custom ReAct-style loop with LangGraph orchestration |
 | LLM providers | Gemini, OpenAI, Groq, OpenRouter (cascading fallback) |
 | RAG | ChromaDB, SentenceTransformers, PyMuPDF |
 | Memory | PostgreSQL (SQLAlchemy) |
-| API | FastAPI |
+| API / MCP transport | FastAPI, official MCP Python SDK v2, Streamable HTTP |
 | Observability | Langfuse (self-hosted via Docker + cloud) |
 | Voice | Speech-to-text + text-to-speech with local mp3 caching |
 | CLI | Rich (styled terminal interface) |
-| Automation | GitHub Actions (scheduled job scanning, morning digest) |
+| Automation | GitHub Actions (daily international job scanning, morning digest) |
+| CV generation | ReportLab, PostgreSQL application records |
 | Deployment | FastAPI Cloud |
 
 ---
@@ -134,7 +184,7 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 
 ### Prerequisites
 - Python 3.11+
-- API keys: Gemini, OpenAI, Groq, OpenRouter (at least one required; more = better fallback coverage)
+- API keys: Groq, Gemini, OpenAI, OpenRouter (at least one required; more = better fallback coverage)
 - Google OAuth credentials for Gmail API (if using email tools)
 
 ### Setup
@@ -156,6 +206,10 @@ GEMINI_API_KEY=your_gemini_key
 OPENAI_API_KEY=your_openai_key
 GROQ_API_KEY=your_groq_key
 OPENROUTER_API_KEY=your_openrouter_key
+LLM_TOTAL_TIMEOUT_SECONDS=45
+LLM_ATTEMPT_TIMEOUT_SECONDS=8
+MCP_ALLOWED_HOSTS=doom-1a9d9743.fastapicloud.dev,doom-1a9d9743.fastapicloud.dev:*
+MCP_ALLOWED_ORIGINS=https://doom-1a9d9743.fastapicloud.dev
 CHROMA_PATH=./data/chroma
 DOCS_PATH=./data/documents
 ```
@@ -173,12 +227,12 @@ src/
 │   └── llm.py            # Multi-provider fallback chain
 ├── api/                  # FastAPI app + routes (chat, upload, transcribe, LinkedIn)
 ├── memory/
-│   ├── database.py       # SQLite conversation history
+│   ├── database.py       # PostgreSQL-backed application and memory data
 │   ├── manager.py        # Memory read/write orchestration
 │   ├── profile.py        # Persistent user profile store
 │   ├── extractor.py       # Background fact extraction from conversations
 │   └── rag.py              # ChromaDB ingestion + semantic search
-├── tools/                 # 35 tool implementations + registry
+├── tools/                 # 26 registered tools + MCP adapter
 ├── voice/                  # STT/TTS
 └── scripts/                 # Scheduled jobs (morning digest, job scanning)
 ```

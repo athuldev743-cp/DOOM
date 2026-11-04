@@ -13,3 +13,4 @@ chromadb_store/
 *.sqlite3
 langfuse-server
 project_structure.txt
+data/generated_cvs/

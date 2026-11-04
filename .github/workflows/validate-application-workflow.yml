@@ -1,0 +1,79 @@
+name: Validate application workflow
+# Keep registry validation static so optional runtime integrations are not imported in CI.
+
+on:
+  pull_request:
+    paths:
+      - "src/api/routes/chat.py"
+      - "src/api/schemas.py"
+      - "src/api/static/js/jobs.js"
+      - "src/memory/database.py"
+      - "src/scripts/scan_jobs.py"
+      - "src/tools/email_tool.py"
+      - "src/tools/jobs_tool.py"
+      - "src/tools/jsearch_client.py"
+      - "src/tools/resume_builder.py"
+      - "src/tools/registry.py"
+      - "data/resumes/master_resume.json"
+      - "requirements.txt"
+      - ".github/workflows/validate-application-workflow.yml"
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check Python syntax
+        run: |
+          python -m py_compile \
+            src/agent/core.py \
+            src/agent/graph.py \
+            src/api/routes/chat.py \
+            src/api/schemas.py \
+            src/memory/database.py \
+            src/scripts/scan_jobs.py \
+            src/tools/email_tool.py \
+            src/tools/jobs_tool.py \
+            src/tools/jsearch_client.py \
+            src/tools/resume_builder.py \
+            src/tools/registry.py
+      - name: Validate master resume and PDF generation
+        run: |
+          pip install reportlab
+          PYTHONPATH=. python - <<'PY'
+          import ast
+          from pathlib import Path
+          from src.tools.resume_builder import (
+              load_master_resume, generate_tailored_cv,
+              generate_cover_letter, is_valid_recipient_email,
+          )
+
+          registry = ast.parse(Path("src/tools/registry.py").read_text())
+          tools_node = next(
+              node.value for node in registry.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "TOOLS" for target in node.targets)
+          )
+          assert len(tools_node.keys) == 26, f"Expected 26 registered tools, found {len(tools_node.keys)}"
+          resume = load_master_resume()
+          assert "26 registered tools" in resume["projects"][0]["bullets"][0]
+          assert resume["experience"][0]["dates"] == "Jul 2025 – Jul 2026"
+          assert not any("Fitness" in project["name"] for project in resume["projects"])
+          letter = generate_cover_letter("AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG")
+          assert "Oquilix" in letter
+          assert "Instagram AI Content Agent" not in letter
+          assert is_valid_recipient_email("recruiter@example.com")
+          assert not is_valid_recipient_email("not-an-email")
+          generated = Path(generate_tailored_cv(99999, "AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG"))
+          assert generated.exists() and generated.stat().st_size > 1000
+          assert generated.read_bytes().startswith(b"%PDF-"), "Generated CV is not a valid PDF file"
+          generated.unlink()
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Check job UI JavaScript syntax
+        run: node --input-type=module --check < src/api/static/js/jobs.js
