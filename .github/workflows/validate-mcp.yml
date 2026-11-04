@@ -9,6 +9,7 @@ on:
       - "src/tools/mcp_server.py"
       - "src/api/app.py"
       - "src/agent/llm_fallback.py"
+      - "src/api/routes/latency.py"
       - "tests/test_llm_fallback.py"
       - "tests/test_mcp_server_adapter.py"
       - "requirements.txt"
@@ -35,7 +36,7 @@ jobs:
           pip install "mcp>=2.3,<3" "pydantic>=2" pytest
       - name: Compile MCP integration
         run: |
-          python -m py_compile src/tools/mcp_server.py src/api/app.py src/agent/llm_fallback.py
+          python -m py_compile src/tools/mcp_server.py src/api/app.py src/agent/llm_fallback.py src/api/routes/latency.py
       - name: Verify all 26 registered tools are exposed by the MCP adapter
         run: |
           python - <<'PY'
