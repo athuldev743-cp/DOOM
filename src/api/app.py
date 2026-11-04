@@ -6,11 +6,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+# Register every SQLAlchemy model before create_all(). ProfileManager is
+# instantiated while the tool registry is imported, so its table must exist
+# before importing routes/tools that create a ProfileManager at module scope.
+from src.memory.database import init_db
+from src.memory.profile import UserProfile  # noqa: F401 - model registration
+from src.tools.reminder import Reminder  # noqa: F401 - model registration
+
+init_db()
+
 from src.api.routes import (
     chat, system, upload, memory, linkedin, transcribe,
     auth as auth_routes, leads, latency,
 )
-from src.memory.database import init_db
 from src.tools.mcp_server import mcp_server, registered_mcp_tool_names
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -32,8 +40,6 @@ MCP_ALLOWED_ORIGINS = [
     if value.strip()
 ]
 
-# Stateless HTTP avoids in-memory session affinity requirements on hosted
-# deployments and works well for request/response tool calls.
 mcp_http_app = mcp_server.streamable_http_app(
     json_response=True,
     stateless_http=True,
@@ -74,8 +80,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DOOM AI", lifespan=lifespan)
-
-init_db()
 
 app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
 
@@ -138,5 +142,4 @@ async def health_check():
 
 
 # Mount last so the existing FastAPI routes keep precedence.
-# The MCP SDK's own endpoint remains /mcp (not /mcp/mcp).
 app.mount("/", mcp_http_app)
