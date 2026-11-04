@@ -131,7 +131,7 @@ async def health_check():
         "mcp": {
             "transport": "streamable-http",
             "endpoint": "/mcp",
-            "tools": 26,
+            "tools": len(registered_mcp_tool_names()),
             "authentication": "owner-only",
         },
     }
