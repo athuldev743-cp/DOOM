@@ -47,22 +47,27 @@ Self-hosted via Docker Compose for local development, with a Langfuse Cloud opti
 
 ## Background job discovery pipeline
 
-Job search went through a real architecture correction worth documenting. The first version had the chat-triggered `job_search` tool perform a live, multi-platform search (Naukri, Wellfound, Indeed, LinkedIn) on every request — taking 20-30+ seconds and re-showing the same jobs on repeat searches, since nothing tracked what had already been surfaced.
+DOOM separates scheduled job discovery from chat delivery. The GitHub Actions scanner runs once daily and searches recent listings across Germany, the Netherlands, the United Kingdom, the UAE, Singapore, and India. Five markets are scanned per day in rotation to stay within the JSearch monthly API budget.
 
-**Root causes found and fixed:**
-- **Dead code**: two separate `JobSearchTool` implementations existed; only one was actually wired into the tool registry, making the other confusing/misleading to edit
-- **A broken conditional** silently defeated an existing optimization meant to skip live page-fetches for platforms known to block scraping (Naukri, Indeed) — every job was being fetched anyway, wasting time on requests that were essentially guaranteed to fail
-- **No persistence** — results were only cached as a single overwritten blob, with no record of what had already been shown
+- Searches AI Automation Engineer, AI Agent Developer, AI Engineer, Python Backend Engineer, Backend Developer, and Full Stack Developer roles.
+- Requests jobs posted within the last week and filters obvious senior titles and explicit requirements of two or more years of experience.
+- Deduplicates URLs with SeenUrl, scores listings against the stored skill profile, and keeps a capped rolling pool in DailyJobMatch.
+- The chat-facing job_search tool reads the highest-scoring 20 matches from PostgreSQL; it does not make live API calls.
 
-**The fix — separating discovery from delivery:**
-Rather than bolting dedup onto the live-search tool, the system now cleanly separates two responsibilities using tables that already existed in the schema but were unused (`SeenUrl`, `DailyJobMatch`):
-
-- **Discovery** (`src/scripts/scan_jobs.py`, run hourly via GitHub Actions): searches all 4 platforms, deduplicates against `SeenUrl`, scores each match, and stores results in `DailyJobMatch` with a `sent=False` flag
-- **Delivery** (the chat-facing `job_search` tool): reads the highest-scored unsent matches directly from the database and marks them delivered — no live search, no re-fetching, no repeats
-
-**Result**: chat responses went from 20-30+ seconds to near-instant, every response is guaranteed new (verified: asking twice in a row correctly returns "no new matches" the second time), and job matches are pre-scored against skill relevance before ever reaching the user.
+Listings can still require local work authorization or relocation sponsorship. DOOM displays the original listing and location/remote metadata; the applicant must verify eligibility with the employer.
 
 ---
+
+## Reviewed job application workflow
+
+Every discovered job receives a persistent JobApplication record. The owner can prepare a tailored CV and cover letter for an individual listing, download the PDF, edit the cover letter, and approve both documents before taking action.
+
+- data/resumes/master_resume.json is the factual source for CV generation. The job description only changes the ordering and emphasis of existing skills, experience bullets, and projects; it does not create new qualifications or achievements.
+- ReportLab generates an ATS-friendly PDF. The PDF bytes are stored on the matching application record in PostgreSQL, so they do not depend on ephemeral server storage.
+- Email applications require a separate owner action after approval. The approved cover letter and that application's exact PDF are attached to the Gmail message.
+- Platform applications open the original job URL. The owner completes the application on the employer's platform and explicitly confirms submission in DOOM.
+- Automatic and bulk application tools are disabled. No application is submitted or emailed directly by the LLM.
+- A daily cleanup removes completed application PDFs after 30 days while retaining application history. Active and pending applications are preserved.
 
 ## The multi-LLM fallback chain
 
@@ -93,23 +98,23 @@ Document retrieval for grounding responses in Athul's real documents (resume, pe
 
 ## Tool-calling discipline
 
-The system prompt encodes a strict protocol rather than relying on the model's native function-calling: exact `TOOL: name` / `ARGS: value` output format, explicit rules against hallucinating job listings or claiming an application was sent when it wasn't, and separation between "search-only" and "search-and-apply" intents (`job_search` vs. `bulk_apply`) so the agent can't accidentally take an action the user only meant to preview.
+The system prompt encodes a strict protocol rather than relying on the model's native function-calling: exact TOOL: name / ARGS: value output format, explicit rules against hallucinating job listings, and a separation between job discovery and application actions.
 
-After a tool runs, its raw result is fed back to the LLM with explicit formatting instructions — present only what the tool returned, never invent additional results — rather than letting the model freely narrate. A short list of tool result prefixes (`CALL:`, `WHATSAPP:`, `JOBS_DATA:`, `APPLY_REPORT:`, etc.) bypass this second LLM pass entirely and return directly, avoiding an unnecessary extra API call for actions that don't need reformatting.
+After a tool runs, its raw result is fed back to the LLM with explicit formatting instructions — present only what the tool returned, never invent additional results — rather than letting the model freely narrate. Application preparation, document approval, email sending, and platform submission are owner-authenticated API actions outside the LLM tool loop.
 
 ---
 
-## Tool categories (35 tools)
+## Tool categories
 
 | Category | Tools |
 |---|---|
-| Job search & applications | `job_search`, `naukri_search`, `naukri_scrape`, `linkedin_jobs`, `auto_apply`, `bulk_apply`, `find_hr_email`, `cover_letter`, `score_jd`, `track_application`, `list_applications` |
-| Email | `read_emails`, `send_email`, `send_resume_email`, `send_email_resume`, `summarize_inbox` |
-| WhatsApp | `whatsapp_api_send`, `whatsapp_api_resume`, `whatsapp_broadcast`, `whatsapp_contact`, `whatsapp_resume` |
-| Contacts & profile | `call_contact`, `add_contact`, `list_contacts`, `set_profile`, `get_profile` |
-| Documents / RAG | `search_docs`, `ingest_docs`, `list_docs` |
-| Productivity | `save_reminder`, `list_reminders`, `daily_briefing`, `get_datetime` |
-| System | `automate` (PC control), `web_search`, `linkedin_profile` |
+| Job search & applications | job_search, find_hr_email, cover_letter, score_jd, track_application, list_applications |
+| Email | read_emails, send_email, summarize_inbox |
+| WhatsApp | whatsapp_api_send, whatsapp_api_resume, whatsapp_broadcast, whatsapp_contact, whatsapp_resume |
+| Contacts & profile | call_contact, add_contact, list_contacts, set_profile, get_profile |
+| Documents / RAG | search_docs, ingest_docs, list_docs |
+| Productivity | save_reminder, list_reminders, daily_briefing, get_datetime |
+| System | automate (PC control), web_search, linkedin_profile |
 
 ---
 
@@ -125,7 +130,8 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 | Observability | Langfuse (self-hosted via Docker + cloud) |
 | Voice | Speech-to-text + text-to-speech with local mp3 caching |
 | CLI | Rich (styled terminal interface) |
-| Automation | GitHub Actions (scheduled job scanning, morning digest) |
+| Automation | GitHub Actions (daily international job scanning, morning digest) |
+| CV generation | ReportLab, PostgreSQL application records |
 | Deployment | FastAPI Cloud |
 
 ---
