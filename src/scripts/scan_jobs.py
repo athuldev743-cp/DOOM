@@ -1,11 +1,11 @@
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, init_db
+from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, JobApplication, init_db
 from src.memory.profile import ProfileManager
 from src.tools.jobs_tool import _load_applied_keys, _is_already_applied
 from src.tools.jsearch_client import search_jobs, build_combined_query
@@ -19,6 +19,28 @@ def run_scan():
     db = SessionLocal()
     p = ProfileManager()
     applied_keys = _load_applied_keys(p)
+
+    # Keep application history, but expire stored PDF bytes 30 days after
+    # a completed application. Active and pending applications are preserved.
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    expired_count = 0
+    for application in db.query(JobApplication).filter(JobApplication.cv_content.isnot(None)).all():
+        closed_dates = [value for value in (application.submitted_at, application.email_sent_at) if value]
+        if closed_dates and max(closed_dates) < cutoff:
+            application.cv_content = None
+            application.cv_path = None
+            expired_count += 1
+    if expired_count:
+        db.commit()
+        print(f"[Cleanup] Expired {expired_count} completed application PDFs older than 30 days.")
+
+    # Remove orphaned temporary PDFs left by interrupted generation.
+    temp_cv_dir = PROJECT_ROOT / "data" / "generated_cvs"
+    if temp_cv_dir.exists():
+        stale_before = datetime.utcnow() - timedelta(days=1)
+        for temp_file in temp_cv_dir.glob("*.pdf"):
+            if datetime.utcfromtimestamp(temp_file.stat().st_mtime) < stale_before:
+                temp_file.unlink(missing_ok=True)
 
     existing_urls = {u.url for u in db.query(SeenUrl.url).all()}
     new_count = 0
