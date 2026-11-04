@@ -97,7 +97,7 @@
       "date": "Nov 2025",
       "url": "https://doom-1a9d9743.fastapicloud.dev",
       "bullets": [
-        "Architected a ReAct-style agent orchestrating 35 specialized tools for job discovery, email, WhatsApp, contacts, RAG, and automation, under strict tool-calling protocols with hallucination guardrails.",
+        "Architected a ReAct-style agent orchestrating 26 registered tools for job discovery, email, WhatsApp, contacts, RAG, and automation, under strict tool-calling protocols with hallucination guardrails.",
         "Achieved zero-downtime AI availability via a 4-provider, 14-model fallback chain (Gemini → OpenAI → Groq → OpenRouter), cleanly handling rate limits and provider outages.",
         "Built a ChromaDB + SentenceTransformers RAG pipeline with overlap-aware chunking and deduplication; automated job-discovery and lead enrichment across Naukri, LinkedIn, Snov.io, and Gmail API."
       ]

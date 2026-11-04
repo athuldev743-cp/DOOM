@@ -184,7 +184,7 @@ src/
 │   ├── profile.py        # Persistent user profile store
 │   ├── extractor.py       # Background fact extraction from conversations
 │   └── rag.py              # ChromaDB ingestion + semantic search
-├── tools/                 # 35 tool implementations + registry
+├── tools/                 # 26 registered tools + supporting implementation modules
 ├── voice/                  # STT/TTS
 └── scripts/                 # Scheduled jobs (morning digest, job scanning)
 ```

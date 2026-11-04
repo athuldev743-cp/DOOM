@@ -49,7 +49,10 @@ jobs:
               generate_cover_letter, is_valid_recipient_email,
           )
 
+          from src.tools.registry import TOOLS
+          assert len(TOOLS) == 26, f"Expected 26 registered tools, found {len(TOOLS)}"
           resume = load_master_resume()
+          assert "26 registered tools" in resume["projects"][0]["bullets"][0]
           assert resume["experience"][0]["dates"] == "Jul 2025 – Jul 2026"
           assert not any("Fitness" in project["name"] for project in resume["projects"])
           letter = generate_cover_letter("AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG")
