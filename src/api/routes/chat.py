@@ -416,9 +416,14 @@ async def success_rate(identity: Identity = Depends(get_current_identity)):
     from src.memory.database import SessionLocal, JobApplication
     db = SessionLocal()
     try:
-        total = db.query(JobApplication).count()
-        submitted = db.query(JobApplication).filter_by(status="submitted").count()
-        rate = round((submitted / total) * 100, 1) if total else 0
-        return {"total": total, "applied": submitted, "failed": total - submitted, "rate": rate}
+        from sqlalchemy import or_
+        attempted = db.query(JobApplication).filter(
+            JobApplication.status.in_(("approved", "opened", "email_sent", "submitted"))
+        ).count()
+        completed = db.query(JobApplication).filter(
+            JobApplication.status.in_(("email_sent", "submitted"))
+        ).count()
+        rate = round((completed / attempted) * 100, 1) if attempted else 0
+        return {"total": attempted, "applied": completed, "failed": attempted - completed, "rate": rate}
     finally:
         db.close()
