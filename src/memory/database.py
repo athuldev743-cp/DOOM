@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from dotenv import load_dotenv
-from sqlalchemy import create_engine, Column, String, Text, DateTime, Boolean, Integer, Index
+from sqlalchemy import create_engine, Column, String, Text, DateTime, Boolean, Integer, Index, LargeBinary
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
 from sqlalchemy.exc import ProgrammingError
@@ -53,7 +53,8 @@ class JobApplication(Base):
     description = Column(Text, nullable=True)
     source = Column(String(100), nullable=True)
     status = Column(String(40), default="discovered", nullable=False)
-    cv_path = Column(String(2048), nullable=True)
+    cv_path = Column(String(255), nullable=True)
+    cv_content = Column(LargeBinary, nullable=True)
     cover_letter = Column(Text, nullable=True)
     recipient_email = Column(String(320), nullable=True)
     email_verified = Column(Boolean, default=False, nullable=False)
