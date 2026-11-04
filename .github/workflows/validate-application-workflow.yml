@@ -69,6 +69,7 @@ jobs:
           assert not is_valid_recipient_email("not-an-email")
           generated = Path(generate_tailored_cv(99999, "AI Automation Engineer", "Example Co", "Python FastAPI LLM RAG"))
           assert generated.exists() and generated.stat().st_size > 1000
+          assert generated.read_bytes().startswith(b"%PDF-"), "Generated CV is not a valid PDF file"
           generated.unlink()
           PY
       - uses: actions/setup-node@v4
