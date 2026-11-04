@@ -75,15 +75,17 @@ export async function applySingleJob(index) {
   if (!job || !job.db_id) return;
   const btn = document.querySelector('#job-card-' + index + ' .btn-apply');
   if (btn) { btn.disabled = true; btn.textContent = 'Opening...'; }
+  const popup = window.open('about:blank', '_blank');
   try {
     const res = await fetch('/api/jobs/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.detail || 'Could not open job');
-    window.open(data.apply_url, '_blank', 'noopener');
+    if (popup) popup.location.href = data.apply_url;
     if (btn) { btn.disabled = false; btn.textContent = 'Listing Opened ↗'; }
     const confirmBtn = document.getElementById('confirm-job-' + index);
     if (confirmBtn) confirmBtn.style.display = 'inline-block';
   } catch (e) {
+    if (popup) popup.close();
     if (btn) { btn.disabled = false; btn.textContent = 'Open Listing ↗'; }
     deps.addMessage('doom', 'Could not open job: ' + e.message);
   }
@@ -125,7 +127,7 @@ export function openJobModal(index) {
 
   const applyBtn = document.getElementById('modal-apply-btn');
   applyBtn.disabled = false;
-  applyBtn.textContent = 'Apply Now 🚀';
+  applyBtn.textContent = 'Open Listing ↗';
   applyBtn.onclick = () => {
     forceCloseJobModal();
     applySingleJob(index);
@@ -350,5 +352,4 @@ export async function updateSuccessRate() {
 window.openJobModal = openJobModal;
 window.applySingleJob = applySingleJob;
 window.confirmJobSubmitted = confirmJobSubmitted;
-window.emailAllJobs = emailAllJobs;
 window.applyToAll = applyToAll;
