@@ -140,6 +140,9 @@ class JobSearchTool(BaseTool):
                         "score": m.score,
                     })
 
+                # Persist newly created application rows before closing the session.
+                db.commit()
+
                 p = ProfileManager()
                 p.set("latest_job_search", json.dumps(jobs), "career")
 
