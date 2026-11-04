@@ -8,7 +8,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.memory.database import SessionLocal, SeenUrl, DailyJobMatch, JobApplication, init_db
 from src.memory.profile import ProfileManager
-from src.tools.jobs_tool import _load_applied_keys, _is_already_applied
+from src.tools.jobs_tool import _load_applied_keys, _is_already_applied, _parse_job_metadata
 from src.tools.jsearch_client import search_jobs, build_combined_query
 from src.tools.job_scoring import score_job
 
@@ -32,6 +32,87 @@ def _is_entry_level_target(job):
     if any(int(years) >= 2 for years in required_years):
         return False
     return True
+
+
+
+def prepare_top_applications(db, now):
+    """Prepare up to five top-ranked recent applications without sending or submitting."""
+    from src.tools.resume_builder import generate_tailored_cv, generate_cover_letter
+
+    active_count = db.query(JobApplication).filter(
+        JobApplication.status.in_(("prepared", "approved", "opened"))
+    ).count()
+    remaining = max(0, 5 - active_count)
+    if remaining == 0:
+        print("[Prepare] Five applications are already pending review; skipping pre-generation.")
+        return 0
+
+    cutoff = now - timedelta(days=7)
+    candidates = (
+        db.query(DailyJobMatch)
+        .filter(DailyJobMatch.applied.is_(False), DailyJobMatch.found_at >= cutoff)
+        .order_by(DailyJobMatch.score.desc())
+        .limit(20)
+        .all()
+    )
+
+    prepared_count = 0
+    for match in candidates:
+        if prepared_count >= remaining:
+            break
+
+        application = db.query(JobApplication).filter_by(job_id=match.id).first()
+        if application and application.status in ("prepared", "approved", "opened", "email_sent", "submitted"):
+            continue
+
+        clean_description, _, _, _ = _parse_job_metadata(match.description or "")
+        if application is None:
+            application = JobApplication(
+                job_id=match.id,
+                job_url=match.url,
+                title=match.title or "",
+                company=match.company or "",
+                description=clean_description,
+                source=match.source,
+                status="discovered",
+            )
+            db.add(application)
+            db.flush()
+
+        generated_path = None
+        try:
+            generated_path = generate_tailored_cv(
+                application.id,
+                application.title,
+                application.company,
+                application.description or clean_description,
+            )
+            generated_file = PROJECT_ROOT / generated_path
+            cv_content = generated_file.read_bytes()
+            cv_filename = generated_file.name
+            generated_file.unlink(missing_ok=True)
+            cover_letter = generate_cover_letter(
+                application.title,
+                application.company,
+                application.description or clean_description,
+            )
+
+            application.cv_path = cv_filename
+            application.cv_content = cv_content
+            application.cover_letter = cover_letter
+            application.status = "prepared"
+            application.prepared_at = now
+            db.commit()
+            prepared_count += 1
+            print(f"[Prepare] Prepared {application.title} at {application.company}.")
+        except Exception as exc:
+            db.rollback()
+            if generated_path:
+                orphan = PROJECT_ROOT / generated_path
+                orphan.unlink(missing_ok=True)
+            print(f"[Prepare] Could not prepare {match.title} at {match.company}: {exc}")
+
+    return prepared_count
 
 
 def run_scan():
@@ -116,6 +197,9 @@ def run_scan():
                 db.delete(job)
             db.commit()
             print(f"[Scan] Pool exceeded {MAX_POOL_SIZE} — dropped {len(to_drop)} lowest-scored matches.")
+
+        prepared_count = prepare_top_applications(db, now)
+        print(f"[Prepare] {prepared_count} new applications prepared for owner review.")
 
     except Exception as e:
         db.rollback()
