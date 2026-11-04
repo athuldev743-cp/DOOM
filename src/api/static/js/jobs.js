@@ -17,13 +17,19 @@ export function initJobs({ sendMessage, addMessage }) {
   deps = { sendMessage, addMessage };
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
+}
+
 export function renderJobCards(payload) {
   const jobs = payload.jobs || payload; // supports old bare-array shape too, just in case
   const platformCounts = payload.platform_counts || {};
   loadedJobs = jobs;
 
   const countsLine = Object.entries(platformCounts)
-    .map(([plat, count]) => `${plat}: ${count}`)
+    .map(([plat, count]) => `${escapeHtml(plat)}: ${Number(count)}`)
     .join(' &nbsp;|&nbsp; ');
 
   let html = `
@@ -42,10 +48,10 @@ export function renderJobCards(payload) {
   jobs.forEach((job, idx) => {
     html += `
       <div class="job-card" id="job-card-${idx}">
-        <div class="job-card-title">${job.title}</div>
-        <div class="job-card-company">${job.company}</div>
-        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${job.location || job.market || "Location not specified"}${job.is_remote ? " · Remote" : ""} · ${job.platform}</span></div>
-        <div class="job-card-snippet">${job.snippet || (job.description ? job.description.substring(0, 100) : '')}...</div>
+        <div class="job-card-title">${escapeHtml(job.title)}</div>
+        <div class="job-card-company">${escapeHtml(job.company)}</div>
+        <div style="margin-bottom:6px;"><span style="font-size:10px;color:var(--text-dim);">📍 ${escapeHtml(job.location || job.market || "Location not specified")}${job.is_remote ? " · Remote" : ""} · ${escapeHtml(job.platform)}</span></div>
+        <div class="job-card-snippet">${escapeHtml(job.snippet || (job.description ? job.description.substring(0, 100) : ''))}...</div>
         <div class="job-card-actions">
           <button class="btn-view" onclick="openJobModal(${idx})">📋 View Details</button>
           <button class="btn-apply" onclick="prepareJobApplication(${idx})">${job.application_status && job.application_status !== "discovered" ? "Review Application" : "Prepare CV"}</button>
