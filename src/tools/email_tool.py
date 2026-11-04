@@ -152,7 +152,7 @@ def send_approved_application_email(to: str, subject: str, body: str, attachment
         msg = MIMEMultipart("mixed")
         msg["To"] = clean_to
         msg["From"] = "athuldev743@gmail.com"
-        msg["Subject"] = subject
+        msg["Subject"] = " ".join(str(subject or "").splitlines())[:200]
         msg.attach(MIMEText(body or "", "plain", "utf-8"))
 
         part = MIMEBase("application", "pdf")
