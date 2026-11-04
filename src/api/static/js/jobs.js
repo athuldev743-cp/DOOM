@@ -31,8 +31,7 @@ export function renderJobCards(payload) {
       <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
         <span style="font-size:12px;color:var(--text-dim);font-family:'DM Mono',monospace;">${jobs.length} jobs found</span>
         <div style="display:flex;gap:6px;">
-          <button class="btn-view" id="email-all-btn" onclick="emailAllJobs()">Email All 📧</button>
-          <button class="btn-apply" id="apply-all-btn" onclick="applyToAll()">Apply All 🚀</button>
+          <span style="font-size:11px;color:var(--text-dim);">Apply individually</span>
         </div>
       </div>
       <div style="font-size:11px;color:var(--text-mid);font-family:'DM Mono',monospace;">${countsLine}</div>
@@ -49,7 +48,8 @@ export function renderJobCards(payload) {
         <div class="job-card-snippet">${job.snippet || (job.description ? job.description.substring(0, 100) : '')}...</div>
         <div class="job-card-actions">
           <button class="btn-view" onclick="openJobModal(${idx})">📋 View Details</button>
-          <button class="btn-apply" onclick="applySingleJob(${idx})">Apply 🚀</button>
+          <button class="btn-apply" onclick="applySingleJob(${idx})">Open Listing ↗</button>
+          <button class="btn-view" id="confirm-job-${idx}" style="display:none" onclick="confirmJobSubmitted(${idx})">Confirm Submitted</button>
         </div>
       </div>
     `;
@@ -72,32 +72,38 @@ export function removeJobCard(index) {
 
 export async function applySingleJob(index) {
   const job = loadedJobs[index];
-  if (!job) return;
-
-  const btn = document.querySelector(`#job-card-${index} .btn-apply`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Applying...'; }
-
+  if (!job || !job.db_id) return;
+  const btn = document.querySelector('#job-card-' + index + ' .btn-apply');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening...'; }
   try {
-    const res = await fetch('/api/apply-single-job', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index })
-    });
+    const res = await fetch('/api/jobs/open', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
     const data = await res.json();
-
-    if (data.apply_url) {
-      window.open(data.apply_url, '_blank'); // manual platforms — open the real listing
-    }
-
-    if (data.success) {
-      removeJobCard(index);
-      updateSuccessRate();
-    } else if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Apply 🚀';
-    }
+    if (!res.ok || !data.success) throw new Error(data.detail || 'Could not open job');
+    window.open(data.apply_url, '_blank', 'noopener');
+    if (btn) { btn.disabled = false; btn.textContent = 'Listing Opened ↗'; }
+    const confirmBtn = document.getElementById('confirm-job-' + index);
+    if (confirmBtn) confirmBtn.style.display = 'inline-block';
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Apply 🚀'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Open Listing ↗'; }
+    deps.addMessage('doom', 'Could not open job: ' + e.message);
+  }
+}
+
+export async function confirmJobSubmitted(index) {
+  const job = loadedJobs[index];
+  if (!job || !job.db_id) return;
+  if (!confirm('Have you completed and submitted this application on the employer platform?')) return;
+  const btn = document.getElementById('confirm-job-' + index);
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const res = await fetch('/api/jobs/confirm-submitted', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: job.db_id }) });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.detail || 'Could not save status');
+    if (btn) btn.textContent = '✓ Submitted';
+    updateSuccessRate();
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Submitted'; }
+    deps.addMessage('doom', 'Could not confirm submission: ' + e.message);
   }
 }
 
@@ -125,18 +131,6 @@ export function openJobModal(index) {
     applySingleJob(index);
   };
 
-  // Add/update the Send Email button — for after manually applying on the platform
-  let emailBtn = document.getElementById('modal-email-btn');
-  if (!emailBtn) {
-    emailBtn = document.createElement('button');
-    emailBtn.id = 'modal-email-btn';
-    emailBtn.className = 'btn-view';
-    emailBtn.style.marginRight = '8px';
-    document.querySelector('.job-modal-footer').prepend(emailBtn);
-  }
-  emailBtn.disabled = false;
-  emailBtn.textContent = '📧 Send Email';
-  emailBtn.onclick = () => sendEmailForJob(index);
 
   document.getElementById('job-modal').classList.add('open');
 }
@@ -355,5 +349,6 @@ export async function updateSuccessRate() {
 // file stays module-private.
 window.openJobModal = openJobModal;
 window.applySingleJob = applySingleJob;
+window.confirmJobSubmitted = confirmJobSubmitted;
 window.emailAllJobs = emailAllJobs;
 window.applyToAll = applyToAll;
