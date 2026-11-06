@@ -1,0 +1,1 @@
+﻿{"local":{"base_url":"http://127.0.0.1:8000"},"deployed":{"base_url":""},"performance":{"vus":[5,10,25,50],"duration":"1m"},"reporting":{"formats":["json","csv","markdown"]}}

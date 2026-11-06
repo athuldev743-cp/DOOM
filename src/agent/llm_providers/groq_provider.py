@@ -67,9 +67,10 @@ class GroqProvider(LLMProvider):
         model_list: list[str] | None = None,
         default_timeout: int = 15,
     ):
+        api_key = os.getenv("GROQ_API_KEY") or os.getenv("GROQAPI_KEY") or "dummy"
         self._client = Groq(
-        api_key=os.getenv("GROQAPI_KEY") or "dummy",
-        max_retries=0,  # our own fallback chain is the sole retry controller
+            api_key=api_key,
+            max_retries=0,  # our own fallback chain is the sole retry controller
         )
 
         self._models = model_list or GROQ_MODELS

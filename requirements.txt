@@ -39,3 +39,6 @@ langgraph
 psycopg
 reportlab
 mcp>=2.3,<3
+pgvector==0.5.1
+fastembed
+pymupdf

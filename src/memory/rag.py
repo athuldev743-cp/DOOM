@@ -1,120 +1,186 @@
+"""PostgreSQL + pgvector document retrieval for DOOM.
+
+Uses the existing SQLAlchemy engine and the dedicated doom_document_chunks table.
+The table is created by evaluation/seed_doom_knowledge.py.
+"""
+
+from __future__ import annotations
+
+import hashlib
 import os
+from functools import lru_cache
+from pathlib import Path
+
 from dotenv import load_dotenv
+from sqlalchemy import text
 
 load_dotenv()
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", "./data/chroma")
 DOCS_PATH = os.getenv("DOCS_PATH", "./data/documents")
+TABLE = "doom_document_chunks"
+MODEL_NAME = "BAAI/bge-small-en-v1.5"
+EMBEDDING_DIM = 384
 
 try:
-    import chromadb
-    from chromadb.utils import embedding_functions
-    import fitz
+    from fastembed import TextEmbedding
+    from src.memory.database import engine
 
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name="all-MiniLM-L6-v2"
-    )
-    collection = client.get_or_create_collection(
-        name="doom_docs",
-        embedding_function=embedding_fn
-    )
     RAG_AVAILABLE = True
 except ImportError:
+    TextEmbedding = None
+    engine = None
     RAG_AVAILABLE = False
-    collection = None
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list:
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk = " ".join(words[i:i+chunk_size])
-        chunks.append(chunk)
-        i += chunk_size - overlap
-    return chunks
+@lru_cache(maxsize=1)
+def _embedder():
+    if not RAG_AVAILABLE:
+        raise RuntimeError("FastEmbed or the DOOM database is unavailable.")
+    return TextEmbedding(model_name=MODEL_NAME)
+
+
+def chunk_text(content: str, chunk_size: int = 450, overlap: int = 60) -> list[str]:
+    if chunk_size <= overlap or overlap < 0:
+        raise ValueError("chunk_size must be greater than overlap >= 0")
+    words = content.split()
+    step = chunk_size - overlap
+    return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), step)]
+
+
+def _vector_literal(values) -> str:
+    values = list(values)
+    if len(values) != EMBEDDING_DIM:
+        raise ValueError(f"Expected {EMBEDDING_DIM} embedding dimensions, got {len(values)}")
+    return "[" + ",".join(f"{float(v):.8f}" for v in values) + "]"
+
+
+def _ingest_content(filename: str, content: str) -> str:
+    if not RAG_AVAILABLE:
+        return "RAG unavailable: FastEmbed or PostgreSQL dependencies are missing."
+    chunks = chunk_text(content)
+    if not chunks:
+        return f"No text content found in {filename}."
+
+    vectors = list(_embedder().embed(chunks))
+    if len(vectors) != len(chunks):
+        raise RuntimeError("Embedding count does not match chunk count.")
+
+    rows = []
+    for index, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        digest = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+        rows.append({
+            "source": filename,
+            "chunk_index": index,
+            "content": chunk,
+            "content_hash": digest,
+            "embedding": _vector_literal(vector),
+        })
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(f"DELETE FROM {TABLE} WHERE source = :source"),
+            {"source": filename},
+        )
+        conn.execute(text(f"""
+            INSERT INTO {TABLE}
+                (source, chunk_index, content, content_hash, embedding)
+            VALUES
+                (:source, :chunk_index, :content, :content_hash, CAST(:embedding AS vector))
+        """), rows)
+
+    return f"Ingested {filename} — {len(chunks)} chunks indexed."
 
 
 def ingest_pdf(filepath: str) -> str:
     if not RAG_AVAILABLE:
-        return "RAG not available on server."
-    filename = os.path.basename(filepath)
-    doc = fitz.open(filepath)
-    full_text = ""
-    for page in doc:
-        full_text += page.get_text()
-    doc.close()
-    chunks = chunk_text(full_text)
-    ids = [f"{filename}_chunk_{i}" for i in range(len(chunks))]
-    metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
+        return "RAG not available: required dependencies are missing."
     try:
-        existing = collection.get(where={"source": filename})
-        if existing["ids"]:
-            collection.delete(ids=existing["ids"])
-    except:
-        pass
-    collection.add(documents=chunks, ids=ids, metadatas=metadatas)
-    return f"✓ Ingested {filename} — {len(chunks)} chunks indexed"
+        import pymupdf
+    except ImportError:
+        return "PDF ingestion unavailable: install pymupdf."
+    path = Path(filepath)
+    if not path.is_file() or path.suffix.lower() != ".pdf":
+        return "Invalid PDF file path."
+    try:
+        with pymupdf.open(path) as doc:
+            content = "\n".join(page.get_text() for page in doc)
+        return _ingest_content(path.name, content)
+    except Exception as exc:
+        return f"PDF ingestion error: {type(exc).__name__}: {exc}"
 
 
 def ingest_text(filepath: str) -> str:
-    if not RAG_AVAILABLE:
-        return "RAG not available on server."
-    filename = os.path.basename(filepath)
-    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-        full_text = f.read()
-    chunks = chunk_text(full_text)
-    ids = [f"{filename}_chunk_{i}" for i in range(len(chunks))]
-    metadatas = [{"source": filename, "chunk": i} for i in range(len(chunks))]
+    path = Path(filepath)
+    if not path.is_file() or path.suffix.lower() not in {".txt", ".md"}:
+        return "Invalid text or Markdown file path."
     try:
-        existing = collection.get(where={"source": filename})
-        if existing["ids"]:
-            collection.delete(ids=existing["ids"])
-    except:
-        pass
-    collection.add(documents=chunks, ids=ids, metadatas=metadatas)
-    return f"✓ Ingested {filename} — {len(chunks)} chunks indexed"
+        content = path.read_text(encoding="utf-8", errors="replace")
+        return _ingest_content(path.name, content)
+    except Exception as exc:
+        return f"Document ingestion error: {type(exc).__name__}: {exc}"
 
 
 def ingest_folder(folder: str = DOCS_PATH) -> str:
     if not RAG_AVAILABLE:
-        return "RAG not available on server."
+        return "RAG not available: required dependencies are missing."
+    root = Path(folder)
+    if not root.is_dir():
+        return f"Documents folder not found: {root}"
     results = []
-    for filename in os.listdir(folder):
-        filepath = os.path.join(folder, filename)
-        if filename.endswith(".pdf"):
-            results.append(ingest_pdf(filepath))
-        elif filename.endswith((".txt", ".md")):
-            results.append(ingest_text(filepath))
-    if not results:
-        return "No documents found in folder."
-    return "\n".join(results)
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() == ".pdf":
+            results.append(ingest_pdf(str(path)))
+        elif path.suffix.lower() in {".txt", ".md"}:
+            results.append(ingest_text(str(path)))
+    return "\n".join(results) if results else "No PDF, TXT, or Markdown documents found."
 
 
 def search_docs(query: str, n_results: int = 3) -> str:
     if not RAG_AVAILABLE:
-        return "Document search not available on server."
+        return "Document search unavailable: required dependencies are missing."
+    query = (query or "").strip()
+    if not query:
+        return "Please provide a search query."
     try:
-        results = collection.query(query_texts=[query], n_results=n_results)
-        if not results["documents"][0]:
+        query_text = "Represent this sentence for searching relevant passages: " + query
+        vector = next(_embedder().embed([query_text]))
+        vector_sql = _vector_literal(vector)
+        with engine.connect() as conn:
+            rows = conn.execute(text(f"""
+                SELECT source, content, chunk_index,
+                       embedding <=> CAST(:embedding AS vector) AS distance
+                FROM {TABLE}
+                ORDER BY embedding <=> CAST(:embedding AS vector)
+                LIMIT :limit
+            """), {"embedding": vector_sql, "limit": max(1, min(int(n_results), 20))}).mappings().all()
+
+        if not rows:
             return "No relevant documents found."
-        output = ""
-        for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-            output += f"[{meta['source']}]\n{doc}\n\n"
-        return output.strip()
-    except Exception as e:
-        return f"Search error: {str(e)}"
+        return "\n\n".join(
+            f"[{row['source']} | chunk {row['chunk_index']}]\n{row['content']}"
+            for row in rows
+        )
+    except Exception as exc:
+        return f"Search error: {type(exc).__name__}: {exc}"
 
 
 def list_docs() -> str:
     if not RAG_AVAILABLE:
-        return "Document listing not available on server."
+        return "Document listing unavailable: required dependencies are missing."
     try:
-        all_docs = collection.get()
-        sources = list(set(m["source"] for m in all_docs["metadatas"]))
-        if not sources:
+        with engine.connect() as conn:
+            rows = conn.execute(text(f"""
+                SELECT source, COUNT(*) AS chunks
+                FROM {TABLE}
+                GROUP BY source
+                ORDER BY source
+            """)).mappings().all()
+        if not rows:
             return "No documents indexed yet."
-        return "Indexed documents:\n" + "\n".join(f"- {s}" for s in sources)
-    except:
-        return "No documents indexed yet."
+        return "Indexed documents:\n" + "\n".join(
+            f"- {row['source']} ({row['chunks']} chunks)" for row in rows
+        )
+    except Exception as exc:
+        return f"Document listing error: {type(exc).__name__}: {exc}"

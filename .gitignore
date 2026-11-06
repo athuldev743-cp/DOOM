@@ -14,3 +14,37 @@ chromadb_store/
 langfuse-server
 project_structure.txt
 data/generated_cvs/
+# Evaluation generated files
+evaluation/results/
+evaluation/__pycache__/
+evaluation/.pytest_cache/
+
+# Test and coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Local backups and temporary review files
+.backups/
+*.chroma-backup
+doom-review.diff
+data/documents/doom_knowledge/career_profile_and_cv_goals.md
+data/documents/doom_knowledge/fitness_ai_coach_project.md
+# Evaluation artifacts
+evaluation/results/
+evaluation/__pycache__/
+evaluation/.pytest_cache/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Local backups and temporary files
+.backups/
+*.chroma-backup
+doom-review.diff
+
+# Private RAG knowledge
+data/documents/doom_knowledge/career_profile_and_cv_goals.md
+data/documents/doom_knowledge/fitness_ai_coach_project.md
+
+evaluation/rag.py.new

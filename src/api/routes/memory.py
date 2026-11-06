@@ -1,10 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from src.api.deps import require_owner
 
 router = APIRouter()
 
 
 @router.get("/memory")
-async def get_memory():
+async def get_memory(_identity=Depends(require_owner)):
     from src.memory.profile import ProfileManager
 
     p = ProfileManager()

@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass
 
-from fastapi import Request
+from fastapi import Depends, HTTPException, Request
 
 from src.agent.core import Agent
 from src.memory.database import init_db
@@ -42,3 +42,10 @@ def get_current_identity(request: Request) -> Identity:
 
     visitor_key = request.cookies.get(VISITOR_COOKIE_NAME) or uuid.uuid4().hex
     return Identity(is_owner=False, visitor_key=visitor_key)
+
+
+def require_owner(identity: Identity = Depends(get_current_identity)) -> Identity:
+    """Require the authenticated DOOM owner for personal-data routes."""
+    if not identity.is_owner:
+        raise HTTPException(status_code=403, detail="Owner authentication required")
+    return identity

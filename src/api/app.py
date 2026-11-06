@@ -16,7 +16,7 @@ from src.tools.reminder import Reminder  # noqa: F401 - model registration
 init_db()
 
 from src.api.routes import (
-    chat, system, upload, memory, linkedin, transcribe,
+    chat, system, upload, memory, transcribe,
     auth as auth_routes, leads, latency,
 )
 from src.tools.mcp_server import mcp_server, registered_mcp_tool_names
@@ -36,6 +36,15 @@ MCP_ALLOWED_ORIGINS = [
     for value in os.getenv(
         "MCP_ALLOWED_ORIGINS",
         "https://doom-1a9d9743.fastapicloud.dev",
+    ).split(",")
+    if value.strip()
+]
+CORS_ALLOWED_ORIGINS = [
+    value.strip()
+    for value in os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost,http://localhost:8000,"
+        "http://127.0.0.1,http://127.0.0.1:8000",
     ).split(",")
     if value.strip()
 ]
@@ -85,7 +94,7 @@ app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -119,7 +128,7 @@ app.include_router(system.router)
 app.include_router(chat.router)
 app.include_router(upload.router)
 app.include_router(memory.router)
-app.include_router(linkedin.router)
+
 app.include_router(transcribe.router)
 app.include_router(auth_routes.router)
 app.include_router(leads.router)

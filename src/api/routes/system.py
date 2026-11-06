@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse, FileResponse
+
+from src.api.deps import require_owner
 
 router = APIRouter()
 
@@ -19,7 +21,7 @@ async def service_worker():
 
 
 @router.get("/briefing")
-async def get_briefing():
+async def get_briefing(_identity=Depends(require_owner)):
     from src.tools.briefing_tool import DailyBriefingTool
 
     tool = DailyBriefingTool()

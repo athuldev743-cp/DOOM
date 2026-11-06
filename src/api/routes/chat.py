@@ -5,7 +5,13 @@ import re
 from fastapi import APIRouter, Depends, Response, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from src.api.schemas import ChatRequest, CommandRequest, ApplyJobRequest, OpenJobRequest, PrepareJobRequest, ApproveJobRequest, SendJobEmailRequest
-from src.api.deps import agent, get_current_identity, Identity, VISITOR_COOKIE_NAME
+from src.api.deps import (
+    agent,
+    get_current_identity,
+    Identity,
+    VISITOR_COOKIE_NAME,
+    require_owner,
+)
 from src.agent.core import Agent
 
 router = APIRouter()
@@ -17,7 +23,11 @@ def _visitor_agent(identity: Identity) -> Agent:
     # A fresh Agent per request is fine here: MemoryManager loads/saves
     # history from the DB keyed by session_id, so there's no in-memory
     # state worth caching, and it guarantees no cross-visitor bleed.
-    return Agent(session_id=f"visitor-{identity.visitor_key}", is_owner=False)
+    return Agent(
+        session_id=f"visitor-{identity.visitor_key}",
+        is_owner=False,
+        visitor_session_key=identity.visitor_key,
+    )
 
 
 @router.post("/chat")
@@ -379,7 +389,10 @@ async def speak_text(request: ChatRequest):
 
 
 @router.post("/command")
-async def run_command(request: CommandRequest):
+async def run_command(
+    request: CommandRequest,
+    _identity: Identity = Depends(require_owner),
+):
     from src.tools.automation import AutomationTool
     tool = AutomationTool()
     result = tool.run(command=request.command, args=request.args)
@@ -387,7 +400,7 @@ async def run_command(request: CommandRequest):
 
 
 @router.get("/reminders")
-async def get_reminders():
+async def get_reminders(_identity: Identity = Depends(require_owner)):
     from src.tools.registry import get_tool
     tool = get_tool("list_reminders")
     result = tool.run()

@@ -1,5 +1,5 @@
 from typing import Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 import json
 
 
@@ -53,6 +53,26 @@ class ListApplicationsArgs(BaseModel):
 
 class CallContactArgs(BaseModel):
     name: str
+
+
+class _RequiredNameArgs(BaseModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def require_name(cls, value: str) -> str:
+        name = value.strip()
+        if not name:
+            raise ValueError("name is required")
+        return name
+
+
+class WhatsAppContactArgs(_RequiredNameArgs):
+    message: str = ""
+
+
+class WhatsAppResumeArgs(_RequiredNameArgs):
+    pass
 
 
 class AddContactArgs(BaseModel):
@@ -172,9 +192,22 @@ class NaukriSearchArgs(BaseModel):
     location: str = ""
 
 
-class LinkedInProfileArgs(BaseModel):
-    pass
+class SaveLeadArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
+    name: str = ""
+    role: str = ""
+    company: str = ""
+    interest: str = ""
+    summary: str = ""
 
-class LinkedInJobSearchArgs(BaseModel):
-    query: str = ""
+    @field_validator("name", "role", "company", "interest", "summary")
+    @classmethod
+    def strip_values(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def require_lead_detail(self):
+        if not any((self.name, self.role, self.company, self.interest, self.summary)):
+            raise ValueError("at least one lead detail is required")
+        return self

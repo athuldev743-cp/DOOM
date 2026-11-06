@@ -35,7 +35,7 @@ validation that was introduced during the Pydantic migration.
 from typing import Optional
 
 from langgraph.graph import StateGraph, START, END
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from src.agent.llm import chat
 from src.tools.registry import get_tool
@@ -84,6 +84,8 @@ class AgentState(BaseModel):
 
     # Number of validation retries
     retries: int = 0
+
+    tool_context: dict[str, str] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -372,10 +374,17 @@ async def call_tool_node(state: AgentState) -> dict:
         }
 
     try:
+        if state.tool_name == "save_lead":
+            session_key = state.tool_context.get("visitor_session_key")
+            if not session_key:
+                raise ValueError("save_lead requires a visitor session")
 
-        result = tool.run(
-            **(state.validated_args or {})
-        )
+            from src.tools.visitor_tool import visitor_lead_context
+
+            with visitor_lead_context(session_key):
+                result = tool.run(**(state.validated_args or {}))
+        else:
+            result = tool.run(**(state.validated_args or {}))
 
         if isinstance(result, ToolResult):
             wire = result.to_wire()
@@ -397,7 +406,6 @@ async def call_tool_node(state: AgentState) -> dict:
     # These results are already formatted for the frontend/client.
     if (
         wire.startswith(BYPASS_PREFIXES)
-        or wire == "LINKEDIN_AUTH_REQUIRED"
         or "NOT_FOUND" in wire
     ):
         return {
@@ -629,6 +637,7 @@ compiled_graph = _build_graph()
 
 async def run_graph(
     seed_messages: list[dict],
+    tool_context: dict[str, str] | None = None,
 ) -> str:
     """
     Run the LangGraph agent.
@@ -647,7 +656,8 @@ async def run_graph(
     """
 
     initial_state = AgentState(
-        messages=seed_messages
+        messages=seed_messages,
+        tool_context=tool_context or {},
     )
 
     result = await compiled_graph.ainvoke(

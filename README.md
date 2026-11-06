@@ -210,6 +210,8 @@ LLM_TOTAL_TIMEOUT_SECONDS=45
 LLM_ATTEMPT_TIMEOUT_SECONDS=8
 MCP_ALLOWED_HOSTS=doom-1a9d9743.fastapicloud.dev,doom-1a9d9743.fastapicloud.dev:*
 MCP_ALLOWED_ORIGINS=https://doom-1a9d9743.fastapicloud.dev
+CORS_ALLOWED_ORIGINS=https://doom-1a9d9743.fastapicloud.dev
+DOCS_UPLOAD_MAX_BYTES=10485760
 CHROMA_PATH=./data/chroma
 DOCS_PATH=./data/documents
 ```

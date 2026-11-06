@@ -3,6 +3,7 @@ from src.memory.profile import ProfileManager
 from src.tools.schemas import (
     ToolResult, CallContactArgs, AddContactArgs,
     ListContactsArgs, SetProfileArgs, GetProfileArgs,
+    WhatsAppContactArgs, WhatsAppResumeArgs,
 )
 
 profile = ProfileManager()
@@ -35,6 +36,15 @@ class CallContactTool(BaseTool):
 class WhatsAppContactTool(BaseTool):
     name = "whatsapp_contact"
     description = "Send WhatsApp message to contact by name"
+    args_schema = WhatsAppContactArgs
+
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        parts = raw.split("|", 1)
+        return {
+            "name": parts[0].strip(),
+            "message": parts[1].strip() if len(parts) > 1 else "",
+        }
 
     def run(self, name: str, message: str = "") -> str:
         # Check if sending resume
@@ -59,6 +69,11 @@ class WhatsAppContactTool(BaseTool):
 class WhatsAppResumeTool(BaseTool):
     name = "whatsapp_resume"
     description = "Send resume/portfolio to a contact via WhatsApp"
+    args_schema = WhatsAppResumeArgs
+
+    @classmethod
+    def parse_args(cls, raw: str) -> dict:
+        return {"name": raw.strip()}
 
     def run(self, name: str) -> str:
         contact = profile.find_contact(name)
