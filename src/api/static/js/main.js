@@ -1,17 +1,17 @@
 // main.js
 import { dom } from './core.js';
-import { initGoogleAuth } from './auth.js';
+import { initGoogleAuth } from './auth.js?v=20261107-loginfix';
 import { toggleSpeak, initVoiceInput } from './audio.js';
 import { sendMessage, addMessage, clearChat, initChat } from './chat.js';
 import { initJobs, closeJobModal, forceCloseJobModal, cancelApplyAll } from './jobs.js';
 import { toggleMemory, closeMemory, uploadDoc, getBriefing } from './panels.js';
-import { initLandingTimer, applyLandingGreeting, dismissHero } from './landing.js';
+import { applyLandingGreeting, dismissHero } from './landing.js?v=20261107-loginfix';
 import { toggleLeadsPanel, closeLeadsPanel, closeLeadModal } from './leads.js';
 
 initJobs({ sendMessage, addMessage });
 initChat();
 initVoiceInput(sendMessage);
-initLandingTimer();
+
 
 // Check the existing DOOM session before offering Google sign-in.
 
@@ -31,7 +31,7 @@ async function refreshIdentity() {
     const loginContainer = document.getElementById('google-login-container');
 
     if (leadsButton) leadsButton.style.display = identity.is_owner ? 'flex' : 'none';
-    if (loginContainer) loginContainer.style.display = identity.is_owner ? 'none' : 'block';
+    if (loginContainer) loginContainer.style.display = identity.is_owner ? 'none' : 'flex';
 
     console.log('DOOM identity:', identity.is_owner ? 'Owner' : 'Guest');
 
@@ -40,6 +40,11 @@ async function refreshIdentity() {
     return identity;
   } catch (error) {
     console.error('Identity check failed:', error);
+
+    const loginContainer = document.getElementById('google-login-container');
+    if (loginContainer) loginContainer.style.display = 'flex';
+
+    initGoogleAuth(refreshIdentity);
     return null;
   }
 }
@@ -98,7 +103,7 @@ document.getElementById('job-modal').addEventListener('click', closeJobModal);
 document.getElementById('job-modal-close-btn').addEventListener('click', forceCloseJobModal);
 document.getElementById('apply-progress-close-btn').addEventListener('click', cancelApplyAll);
 
-// Leads sidebar (owner only — button stays hidden otherwise)
+// Leads sidebar (owner only â€” button stays hidden otherwise)
 document.getElementById('leads-toggle-btn').addEventListener('click', toggleLeadsPanel);
 document.getElementById('leads-panel').addEventListener('click', closeLeadsPanel);
 document.getElementById('leads-close-btn').addEventListener('click', () => {

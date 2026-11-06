@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="DOOM" />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=20261107-loginfix" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -38,7 +38,7 @@
   </div>
 
   <!-- LANDING GREETING (fades out on first interaction) -->
-  <div class="landing-hero" id="landing-hero">
+  <div class="landing-hero hidden" id="landing-hero">
     <div class="hero-mark">D</div>
     <h1 class="hero-greeting" id="hero-greeting">Hi there 👋</h1>
     <p class="hero-sub" id="hero-sub">I'm DOOM — Athul's personal AI assistant.</p>
@@ -139,6 +139,6 @@
   </div>
 </div>
 
-<script type="module" src="/static/js/main.js"></script>
+<script type="module" src="/static/js/main.js?v=20261107-loginfix"></script>
 </body>
 </html>

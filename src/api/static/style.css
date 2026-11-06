@@ -1022,3 +1022,21 @@ html, body {
   padding: 40px 10px;
   font-family: 'DM Mono', monospace;
 }
+/* DOOM GOOGLE LOGIN BUTTON */
+#google-login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+}
+#google-signin-button {
+  display: flex;
+  align-items: center;
+}
+#google-signin-button iframe {
+  max-width: 100%;
+}
+.header-actions {
+  align-items: center;
+  gap: 8px;
+}
