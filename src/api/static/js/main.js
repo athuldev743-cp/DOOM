@@ -12,22 +12,47 @@ initJobs({ sendMessage, addMessage });
 initChat();
 initVoiceInput(sendMessage);
 initLandingTimer();
-window.addEventListener('load', initGoogleAuth);
 
-// Single identity check drives both the greeting and whether the
-// visitors sidebar toggle is shown at all.
-(async function initIdentity() {
+// Initialize Google authentication and synchronize DOOM identity.
+
+async function refreshIdentity() {
   try {
-    const res = await fetch('/auth/whoami');
-    const identity = await res.json();
-    applyLandingGreeting(identity);
-    if (identity.is_owner) {
-      document.getElementById('leads-toggle-btn').style.display = 'flex';
+    const res = await fetch('/auth/whoami', {
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+
+    if (!res.ok) {
+      throw new Error(`Identity request failed: ${res.status}`);
     }
-  } catch (e) {
-    console.log('identity check failed:', e);
+
+    const identity = await res.json();
+
+    applyLandingGreeting(identity);
+
+    const leadsButton = document.getElementById('leads-toggle-btn');
+
+    if (leadsButton) {
+      leadsButton.style.display = identity.is_owner ? 'flex' : 'none';
+    }
+
+    console.log('DOOM identity:', identity.is_owner ? 'Owner' : 'Guest');
+
+    return identity;
+  } catch (error) {
+    console.error('Identity check failed:', error);
+    return null;
   }
-})();
+}
+
+// Check an existing session immediately.
+refreshIdentity();
+
+// Google automatic sign-in can create a new session.
+// Refresh the identity after that happens.
+window.addEventListener('load', () => {
+  initGoogleAuth(refreshIdentity);
+});
 
 // Dismiss the landing hero the moment the visitor engages with anything.
 dom.inputEl.addEventListener('input', dismissHero, { once: true });
