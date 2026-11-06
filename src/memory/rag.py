@@ -140,30 +140,81 @@ def ingest_folder(folder: str = DOCS_PATH) -> str:
 def search_docs(query: str, n_results: int = 3) -> str:
     if not RAG_AVAILABLE:
         return "Document search unavailable: required dependencies are missing."
+
     query = (query or "").strip()
     if not query:
         return "Please provide a search query."
+
     try:
+        limit = max(1, min(int(n_results), 20))
+        candidate_limit = min(max(limit * 5, 20), 100)
+
         query_text = "Represent this sentence for searching relevant passages: " + query
         vector = next(_embedder().embed([query_text]))
         vector_sql = _vector_literal(vector)
+
         with engine.connect() as conn:
             rows = conn.execute(text(f"""
-                SELECT source, content, chunk_index,
-                       embedding <=> CAST(:embedding AS vector) AS distance
-                FROM {TABLE}
-                ORDER BY embedding <=> CAST(:embedding AS vector)
+                WITH vector_candidates AS (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               ORDER BY embedding <=> CAST(:embedding AS vector)
+                           ) AS position_rank
+                    FROM {TABLE}
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
+                    LIMIT :candidate_limit
+                ),
+                lexical_candidates AS (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               ORDER BY ts_rank_cd(
+                                   search_vector,
+                                   websearch_to_tsquery('english', :query)
+                               ) DESC
+                           ) AS position_rank
+                    FROM {TABLE}
+                    WHERE search_vector @@ websearch_to_tsquery('english', :query)
+                    ORDER BY ts_rank_cd(
+                        search_vector,
+                        websearch_to_tsquery('english', :query)
+                    ) DESC
+                    LIMIT :candidate_limit
+                ),
+                combined_ranks AS (
+                    SELECT id, position_rank FROM vector_candidates
+                    UNION ALL
+                    SELECT id, position_rank FROM lexical_candidates
+                ),
+                fused_results AS (
+                    SELECT id,
+                           SUM(1.0 / (60.0 + position_rank)) AS rrf_score
+                    FROM combined_ranks
+                    GROUP BY id
+                )
+                SELECT d.source, d.content, d.chunk_index, f.rrf_score
+                FROM fused_results f
+                JOIN {TABLE} d ON d.id = f.id
+                ORDER BY f.rrf_score DESC, d.source, d.chunk_index
                 LIMIT :limit
-            """), {"embedding": vector_sql, "limit": max(1, min(int(n_results), 20))}).mappings().all()
+            """), {
+                "embedding": vector_sql,
+                "query": query,
+                "candidate_limit": candidate_limit,
+                "limit": limit,
+            }).mappings().all()
 
         if not rows:
             return "No relevant documents found."
+
         return "\n\n".join(
             f"[{row['source']} | chunk {row['chunk_index']}]\n{row['content']}"
             for row in rows
         )
+
     except Exception as exc:
         return f"Search error: {type(exc).__name__}: {exc}"
+
+
 
 
 def list_docs() -> str:
