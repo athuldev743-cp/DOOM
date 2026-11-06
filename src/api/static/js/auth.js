@@ -1,15 +1,25 @@
-﻿// auth.js
-// Google Sign-In integration.
+﻿// Google Sign-In: explicit button only. No automatic One Tap prompt.
 
-// Google Sign-In integration.
+let initialized = false;
+let attempts = 0;
 
 export function initGoogleAuth(onAuthenticated) {
-  if (!window.google?.accounts?.id) {
-    console.error('Google Identity Services unavailable');
+  if (initialized) return;
+
+  const googleId = window.google?.accounts?.id;
+
+  if (!googleId) {
+    if (attempts++ < 20) {
+      setTimeout(() => initGoogleAuth(onAuthenticated), 300);
+    } else {
+      console.error('Google Identity Services failed to load.');
+    }
     return;
   }
 
-  google.accounts.id.initialize({
+  initialized = true;
+
+  googleId.initialize({
     client_id: "1069358536248-fs6uak4fv0uof46l4usuir0tlmae2u9m.apps.googleusercontent.com",
     callback: async (response) => {
       try {
@@ -27,19 +37,15 @@ export function initGoogleAuth(onAuthenticated) {
           return;
         }
 
-        console.log('DOOM session created');
-
-        if (onAuthenticated) {
-          await onAuthenticated();
-        }
+        if (onAuthenticated) await onAuthenticated();
       } catch (error) {
         console.error('Google sign-in failed:', error);
       }
-    },
-    auto_select: true,
-    itp_support: true
+    }
   });
 
-  google.accounts.id.prompt();
+  googleId.renderButton(
+    document.getElementById('google-signin-button'),
+    { theme: 'outline', size: 'medium', text: 'signin_with', shape: 'pill' }
+  );
 }
-

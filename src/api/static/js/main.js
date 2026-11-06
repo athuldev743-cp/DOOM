@@ -13,7 +13,7 @@ initChat();
 initVoiceInput(sendMessage);
 initLandingTimer();
 
-// Initialize Google authentication and synchronize DOOM identity.
+// Check the existing DOOM session before offering Google sign-in.
 
 async function refreshIdentity() {
   try {
@@ -22,21 +22,20 @@ async function refreshIdentity() {
       cache: 'no-store'
     });
 
-    if (!res.ok) {
-      throw new Error(`Identity request failed: ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`Identity request failed: ${res.status}`);
 
     const identity = await res.json();
-
     applyLandingGreeting(identity);
 
     const leadsButton = document.getElementById('leads-toggle-btn');
+    const loginContainer = document.getElementById('google-login-container');
 
-    if (leadsButton) {
-      leadsButton.style.display = identity.is_owner ? 'flex' : 'none';
-    }
+    if (leadsButton) leadsButton.style.display = identity.is_owner ? 'flex' : 'none';
+    if (loginContainer) loginContainer.style.display = identity.is_owner ? 'none' : 'block';
 
     console.log('DOOM identity:', identity.is_owner ? 'Owner' : 'Guest');
+
+    if (!identity.is_owner) initGoogleAuth(refreshIdentity);
 
     return identity;
   } catch (error) {
@@ -45,15 +44,7 @@ async function refreshIdentity() {
   }
 }
 
-// Check an existing session immediately.
 refreshIdentity();
-
-// Google automatic sign-in can create a new session.
-// Refresh the identity after that happens.
-window.addEventListener('load', () => {
-  initGoogleAuth(refreshIdentity);
-});
-
 // Dismiss the landing hero the moment the visitor engages with anything.
 dom.inputEl.addEventListener('input', dismissHero, { once: true });
 dom.sendBtn.addEventListener('click', dismissHero, { once: true });
