@@ -187,7 +187,7 @@ async def _run_langgraph(request_count: int) -> dict:
             {"role": "user", "content": "Reply with: DOOM LangGraph evaluation passed."},
         ]
         started = time.perf_counter()
-        response = await asyncio.wait_for(run_graph(messages, tool_context={}), timeout=120)
+        response = await asyncio.wait_for(run_graph(messages, tool_context={"evaluation_disable_tools": "true"}), timeout=120)
         timings.append((time.perf_counter() - started) * 1000)
         previews.append(str(response)[:240])
         if not response.strip():
