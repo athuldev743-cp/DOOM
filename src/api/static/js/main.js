@@ -28,9 +28,11 @@ async function refreshIdentity() {
     applyLandingGreeting(identity);
 
     const leadsButton = document.getElementById('leads-toggle-btn');
+    const evalButton = document.getElementById('eval-toggle-btn');
     const loginContainer = document.getElementById('google-login-container');
 
     if (leadsButton) leadsButton.style.display = identity.is_owner ? 'flex' : 'none';
+    if (evalButton) evalButton.style.display = identity.is_owner ? 'flex' : 'none';
     if (loginContainer) loginContainer.style.display = identity.is_owner ? 'none' : 'flex';
 
     console.log('DOOM identity:', identity.is_owner ? 'Owner' : 'Guest');
