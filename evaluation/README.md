@@ -31,3 +31,13 @@ Owner-only evaluation console available at /evaluation after deployment.
 ## Local checks
 
 Run python -m pytest -q evaluation/test_dashboard.py and the existing test suite before deployment.
+
+## External k6 load test
+
+The dashboard latency card intentionally measures the in-process ASGI stack. For public-network latency, concurrency and throughput, run the separate k6 script from a machine outside the server:
+
+```powershell
+k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=5 -e ITERATIONS=100 evaluation/k6/dashboard-health-load.js
+```
+
+k6 reports request duration percentiles, request rate, failed-request rate and iteration throughput. The default thresholds are p95 below 1500 ms, p99 below 3000 ms and failures below 1%; tune them to the service's agreed SLOs before treating them as release gates.
