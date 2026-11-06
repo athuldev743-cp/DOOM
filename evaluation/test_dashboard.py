@@ -1,6 +1,7 @@
 from pydantic import ValidationError
 import pytest
 
+from src.api.deps import require_owner
 from src.api.routes.evaluation import CATALOG, RunConfig, router
 
 
@@ -24,4 +25,4 @@ def test_evaluation_routes_are_registered_and_owner_protected():
     assert (("GET",), "/evaluation/api/catalog") in routes
     assert (("POST",), "/evaluation/api/run/{test_id}") in routes
     for route in router.routes:
-        assert route.dependencies or any(getattr(dep, "dependency", None).__name__ == "require_owner" for dep in route.dependant.dependencies)
+        assert any(dependency.call is require_owner for dependency in route.dependant.dependencies)
