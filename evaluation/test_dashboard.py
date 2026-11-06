@@ -1,8 +1,11 @@
+import asyncio
+
 from pydantic import ValidationError
 import pytest
 
 from src.api.deps import require_owner
 from src.api.routes.evaluation import CATALOG, RunConfig, router
+from src.agent.graph import AgentState, validate_args_node
 
 
 def test_dashboard_catalog_contains_all_required_modules():
@@ -26,3 +29,13 @@ def test_evaluation_routes_are_registered_and_owner_protected():
     assert (("POST",), "/evaluation/api/run/{test_id}") in routes
     for route in router.routes:
         assert any(dependency.call is require_owner for dependency in route.dependant.dependencies)
+
+
+def test_langgraph_evaluation_context_blocks_tool_side_effects():
+    state = AgentState(
+        messages=[],
+        tool_name="ingest_docs",
+        tool_context={"evaluation_disable_tools": "true"},
+    )
+    result = asyncio.run(validate_args_node(state))
+    assert result["validation_error"] == "Tool execution is disabled during evaluation."
