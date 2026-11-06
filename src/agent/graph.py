@@ -265,6 +265,13 @@ async def validate_args_node(state: AgentState) -> dict:
             "validation_error": "No tool name supplied."
         }
 
+    # Evaluation runs may exercise the LLM and graph routing, but must never
+    # execute application tools or their external side effects.
+    if state.tool_context.get("evaluation_disable_tools") == "true":
+        return {
+            "validation_error": "Tool execution is disabled during evaluation."
+        }
+
     tool = get_tool(state.tool_name)
 
     if not tool:

@@ -1,26 +1,43 @@
-﻿# DOOM Engineering Evaluation
+# DOOM Engineering Evaluation
 
-Automated evaluation framework for the DOOM AI backend.
+Owner-only evaluation console available at /evaluation after deployment.
 
-## Evaluation modules
+## Dashboard modules
 
-1. Security: authentication, authorization, input validation and upload security.
-2. Reliability: API and MCP tool execution, failure handling and concurrency.
-3. Performance: throughput, latency percentiles, load and stress testing using k6.
-4. Agent evaluation: routing accuracy, tool selection, task completion and RAG quality.
-5. Reporting: consolidated JSON, CSV and Markdown evaluation reports.
+1. RAG retrieval — hybrid vector + PostgreSQL full-text retrieval, curated source-level hit rate, precision, MRR, corpus and index checks, plus retrieval latency percentiles.
+2. MCP tools — registered tool consistency and actual in-process MCP adapter calls for list_docs and search_docs.
+3. LangGraph — compiled graph availability and end-to-end graph invocation through the configured LLM provider.
+4. API latency — repeated in-process ASGI /health requests with average, p50, p95, p99 and maximum latency.
+5. API & database — database connectivity, pgvector, corpus, embedding dimensions, FTS column and indexes.
+6. Security — invalid session rejection and unauthenticated access denial for protected evaluation APIs.
 
-## Results
+## Running
 
-- results/local: measurements from the local backend.
-- results/deployed: measurements from the deployed backend.
+- Sign in as the owner and open /evaluation.
+- Run one card or select Run all tests.
+- Set the count on each card before running.
+- Reports are written under evaluation/results/deployed/ when the server filesystem is writable.
 
-## Methodology
+## Limits and interpretation
 
-Keep local and deployed measurements separate. Record test configuration, date,
-request count, success rate, errors, average latency, p50, p90, p95 and p99.
-Never report unmeasured or mocked results as real-world benchmark results.
+- RAG relevance is a curated expected-source smoke benchmark, not human-judged relevance.
+- MCP checks call the registered in-process adapters. They do not measure a remote MCP client handshake or transport latency.
+- LangGraph execution calls the configured LLM and consumes provider tokens. The dashboard caps graph runs at three per request.
+- Latency results use in-process ASGI requests and exclude internet, DNS, TLS, reverse proxy and external client latency.
+- Counts are bounded per module to protect the deployed service.
+- External throughput, concurrent virtual users and public-network p95/p99 must be measured separately with k6 from an external load generator.
+- The dashboard never reports local historical measurements as deployed results.
 
-## Status
+## Local checks
 
-Scaffold created. Evaluation scripts will be implemented and validated individually.
+Run python -m pytest -q evaluation/test_dashboard.py and the existing test suite before deployment.
+
+## External k6 load test
+
+The dashboard latency card intentionally measures the in-process ASGI stack. For public-network latency, concurrency and throughput, run the separate k6 script from a machine outside the server:
+
+```powershell
+k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=5 -e ITERATIONS=100 evaluation/k6/dashboard-health-load.js
+```
+
+k6 reports request duration percentiles, request rate, failed-request rate and iteration throughput. The default thresholds are p95 below 1500 ms, p99 below 3000 ms and failures below 1%; tune them to the service's agreed SLOs before treating them as release gates.

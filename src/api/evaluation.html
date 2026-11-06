@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080808">
+  <title>DOOM · Evaluation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/evaluation.css?v=20261107-eval1">
+</head>
+<body>
+  <main class="eval-shell">
+    <header class="topbar">
+      <a class="brand" href="/"><span class="brand-mark">D</span><span>DOOM <small>ENGINEERING</small></span></a>
+      <div class="top-actions"><span class="live-dot"></span><span>DEPLOYED INSTANCE</span><a href="/">← Back to DOOM</a></div>
+    </header>
+    <section class="intro">
+      <div class="eyebrow">SYSTEM QUALITY · LIVE EVALUATION</div>
+      <h1>Evaluation <span>Center</span></h1>
+      <p>Run real checks against the running DOOM backend. Each module reports its own status, measurements and diagnostic details.</p>
+      <div class="summary-row">
+        <div class="summary"><strong id="total-tests">6</strong><span>TEST MODULES</span></div>
+        <div class="summary"><strong id="passed-tests">—</strong><span>PASSED</span></div>
+        <div class="summary"><strong id="failed-tests">—</strong><span>FAILED</span></div>
+        <div class="summary"><strong id="last-duration">—</strong><span>LAST RUN</span></div>
+      </div>
+    </section>
+    <section class="toolbar">
+      <div><h2>Test modules</h2><p>Configure the count, then run a module or the full suite.</p></div>
+      <button id="run-all" class="primary">▶ Run all tests</button>
+    </section>
+    <div id="notice" class="notice" role="status">Loading evaluation modules…</div>
+    <section id="test-grid" class="test-grid" aria-live="polite"></section>
+    <section class="scope-note">
+      <h3>Measurement boundaries</h3>
+      <p><b>RAG relevance:</b> curated expected-source scoring, not human-judged relevance. <b>MCP:</b> in-process adapter execution, not an external protocol handshake. <b>LangGraph:</b> invokes the configured LLM and consumes provider tokens. <b>Latency:</b> in-process ASGI measurements, not internet-facing load-test percentiles.</p>
+      <p>For external throughput and network p95/p99, run k6 from a separate load generator. Test counts are capped to protect the production service.</p>
+    </section>
+    <footer>DOOM AI · OWNER-ONLY EVALUATION CONSOLE</footer>
+  </main>
+  <script type="module" src="/static/js/evaluation.js?v=20261107-eval1"></script>
+</body>
+</html>
