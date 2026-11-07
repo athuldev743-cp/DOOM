@@ -234,6 +234,15 @@ async def decide_node(state: AgentState) -> dict:
 
     tool_name, args_raw = _parse_tool_call(response)
 
+    # Detect malformed tool-call syntax so the graph can retry.
+    malformed_tool_call = (
+        not tool_name
+        and any(
+            line.strip().lower().startswith(("tool:", "args:"))
+            for line in response.splitlines()
+        )
+    )
+
     new_messages = state.messages + [
         {
             "role": "assistant",
@@ -246,8 +255,12 @@ async def decide_node(state: AgentState) -> dict:
         "tool_name": tool_name,
         "tool_args_raw": args_raw,
 
-        # Clear stale validation state when starting another decision.
-        "validation_error": None,
+        # Preserve malformed-call errors for retry routing.
+        "validation_error": (
+            "Malformed tool-call format. Use exactly TOOL: <registered_tool_name> "
+            "followed by ARGS: <arguments>."
+            if malformed_tool_call else None
+        ),
 
         # Clear stale validated args.
         "validated_args": None,
@@ -341,8 +354,7 @@ async def retry_node(state: AgentState) -> dict:
     correction = {
         "role": "user",
         "content": (
-            "Your last tool call had invalid arguments and failed "
-            "validation.\n\n"
+            "Your previous tool call was invalid or incorrectly formatted.\n\n"
             f"Validation error:\n{state.validation_error}\n\n"
             "Re-issue the TOOL:/ARGS: call with corrected arguments "
             "matching the expected format."
@@ -481,11 +493,15 @@ async def respond_node(state: AgentState) -> dict:
 
 def route_after_decide(state: AgentState) -> str:
     """
-    Decide whether the LLM requested a tool.
-
-    If a tool name was emitted, send it to validation.
-    The validation node checks whether the tool exists.
+    Route valid tool calls to validation, malformed calls to retry,
+    and ordinary conversational responses to the user.
     """
+    if state.validation_error:
+        if state.retries >= MAX_RETRIES:
+            print("[Graph] decision retry limit reached")
+            return "respond"
+        return "retry"
+
     if state.tool_name:
         return "validate_args"
 
@@ -588,6 +604,7 @@ def _build_graph():
         route_after_decide,
         {
             "validate_args": "validate_args",
+            "retry": "retry",
             "respond": "respond",
         },
     )
