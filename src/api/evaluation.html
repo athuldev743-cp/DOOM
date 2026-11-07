@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080808">
   <title>DOOM · Evaluation</title>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/evaluation.css?v=20261107-terminal1">
+  <link rel="stylesheet" href="/static/evaluation.css?v=20261107-production1">
 </head>
 <body>
   <main class="eval-shell">
@@ -35,6 +35,28 @@
       <pre id="terminal-output" class="terminal-output" role="log" aria-live="polite">Loading test runner…</pre>
     </section>
     <section id="test-grid" class="test-grid" aria-live="polite"></section>
+    <section class="toolbar production-toolbar">
+      <div><h2>Production Performance &amp; Reliability</h2><p>Advanced checks with safe limits. These run separately from the six baseline tests.</p></div>
+      <button id="run-production-all" class="primary">▶ Run production tests</button>
+    </section>
+    <div class="production-config">
+      <label>RAG concurrency <input id="production-concurrency" type="number" min="1" max="10" value="3"></label>
+      <label>RAG requests <input id="production-requests" type="number" min="1" max="40" value="12"></label>
+      <label>Graph runs <input id="production-runs" type="number" min="1" max="2" value="1"></label>
+    </div>
+    <section id="production-grid" class="test-grid" aria-live="polite"></section>
+    <section class="external-panel">
+      <h3>External k6 tests · run from your PC</h3>
+      <p>Public-network percentiles and the real remote MCP handshake must run outside the server. These commands use the same live terminal in your PowerShell window.</p>
+      <div class="external-config">
+        <label>Virtual users <input id="k6-vus" type="number" min="1" max="50" value="5"></label>
+        <label>Duration <select id="k6-duration"><option value="30s">30 seconds</option><option value="1m" selected>1 minute</option><option value="3m">3 minutes</option></select></label>
+        <label>Owner session token (MCP only) <input id="k6-token" type="password" placeholder="Paste locally; never save or share"></label>
+      </div>
+      <div class="external-command"><b>Public network load</b><code id="k6-load-command">k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=5 -e DURATION=1m evaluation/k6/production-load.js</code><button id="copy-k6-load" class="run-one">Copy command</button></div>
+      <div class="external-command"><b>Real MCP protocol</b><code id="k6-mcp-command">Set DOOM_SESSION before running the MCP test.</code><button id="copy-k6-mcp" class="run-one">Copy command</button></div>
+      <p class="external-note">Start with 5 VUs. The load test targets the lightweight /health endpoint; RAG concurrency is measured separately above. Do not run high-volume stress tests against production.</p>
+    </section>
     <section class="scope-note">
       <h3>Measurement boundaries</h3>
       <p><b>RAG relevance:</b> curated expected-source scoring, not human-judged relevance. <b>MCP:</b> in-process adapter execution, not an external protocol handshake. <b>LangGraph:</b> invokes the configured LLM and consumes provider tokens. <b>Latency:</b> in-process ASGI measurements, not internet-facing load-test percentiles.</p>
@@ -42,6 +64,6 @@
     </section>
     <footer>DOOM AI · OWNER-ONLY EVALUATION CONSOLE</footer>
   </main>
-  <script type="module" src="/static/js/evaluation.js?v=20261107-terminal1"></script>
+  <script type="module" src="/static/js/evaluation.js?v=20261107-production1"></script>
 </body>
 </html>
