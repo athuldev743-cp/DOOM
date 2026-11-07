@@ -137,7 +137,21 @@ def ingest_folder(folder: str = DOCS_PATH) -> str:
     return "\n".join(results) if results else "No PDF, TXT, or Markdown documents found."
 
 
+
 def search_docs(query: str, n_results: int = 3) -> str:
+    import logging
+    import time
+
+    logger = logging.getLogger(__name__)
+    total_start = time.perf_counter()
+    stage = "validation"
+
+    timings = {
+        "embedding_ms": 0.0,
+        "db_acquire_ms": 0.0,
+        "sql_execution_ms": 0.0,
+    }
+
     if not RAG_AVAILABLE:
         return "Document search unavailable: required dependencies are missing."
 
@@ -150,10 +164,26 @@ def search_docs(query: str, n_results: int = 3) -> str:
         candidate_limit = min(max(limit * 5, 20), 100)
 
         query_text = "Represent this sentence for searching relevant passages: " + query
+
+        stage = "embedding"
+        started = time.perf_counter()
         vector = next(_embedder().embed([query_text]))
         vector_sql = _vector_literal(vector)
+        timings["embedding_ms"] = round(
+            (time.perf_counter() - started) * 1000, 2
+        )
+
+        stage = "db_acquire"
+        started = time.perf_counter()
 
         with engine.connect() as conn:
+            timings["db_acquire_ms"] = round(
+                (time.perf_counter() - started) * 1000, 2
+            )
+
+            stage = "sql_execution"
+            started = time.perf_counter()
+
             rows = conn.execute(text(f"""
                 WITH vector_candidates AS (
                     SELECT id,
@@ -203,6 +233,22 @@ def search_docs(query: str, n_results: int = 3) -> str:
                 "limit": limit,
             }).mappings().all()
 
+            timings["sql_execution_ms"] = round(
+                (time.perf_counter() - started) * 1000, 2
+            )
+
+        total_ms = round((time.perf_counter() - total_start) * 1000, 2)
+
+        logger.info(
+            "[RAG_TIMING] embedding_ms=%.2f db_acquire_ms=%.2f "
+            "sql_execution_ms=%.2f total_ms=%.2f rows=%d",
+            timings["embedding_ms"],
+            timings["db_acquire_ms"],
+            timings["sql_execution_ms"],
+            total_ms,
+            len(rows),
+        )
+
         if not rows:
             return "No relevant documents found."
 
@@ -212,7 +258,17 @@ def search_docs(query: str, n_results: int = 3) -> str:
         )
 
     except Exception as exc:
+        total_ms = round((time.perf_counter() - total_start) * 1000, 2)
+
+        logger.exception(
+            "[RAG_FAILURE] stage=%s total_ms=%.2f timings=%s",
+            stage,
+            total_ms,
+            timings,
+        )
+
         return f"Search error: {type(exc).__name__}: {exc}"
+
 
 
 
