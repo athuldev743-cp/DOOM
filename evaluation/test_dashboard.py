@@ -45,7 +45,10 @@ def test_terminal_runner_uses_parallel_workers_and_reports_each_module():
     from pathlib import Path
 
     script = Path("src/api/static/js/evaluation.js").read_text(encoding="utf-8")
-    assert "Promise.all(Array.from({ length: concurrency }, worker))" in script
+    assert 'new Set(["rag", "mcp", "langgraph", "database"])' in script
+    assert "await Promise.all(Array.from({ length: Math.min(2, lightItems.length) }" in script
+    assert "for (const item of heavyItems)" in script
+    assert "non-JSON response" in script
     assert "FINAL SUMMARY" in script
     assert "checks_passed" in script
     assert "MODULES COMPLETE" in script
@@ -57,3 +60,12 @@ def test_evaluation_page_contains_live_terminal():
     page = Path("src/api/evaluation.html").read_text(encoding="utf-8")
     assert 'id="terminal-output"' in page
     assert 'id="terminal-meta"' in page
+
+
+def test_production_runner_serializes_heavy_modules_and_parallelizes_light_checks():
+    from pathlib import Path
+
+    script = Path("src/api/static/js/evaluation.js").read_text(encoding="utf-8")
+    assert 'new Set(["rag_concurrency", "langgraph_trace"])' in script
+    assert "await Promise.all(lightProduction.map" in script
+    assert "for (const item of heavyProductionItems)" in script
