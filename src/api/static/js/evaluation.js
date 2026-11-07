@@ -169,7 +169,7 @@ runAllButton.addEventListener("click", async () => {
     const value = results.get("production:" + item.id);
     log(`${value?.status === "passed" ? "PASS" : "FAIL "}  ${item.title} · ${value?.checks_passed || 0}/${(value?.checks_passed || 0) + (value?.checks_failed || 0)} checks · ${fmt(value?.duration_ms || 0)} ms`);
   });
-  log(`TOTAL: ${passed}/${catalog.length} modules passed · ${failed} failed · ${checksPassed} checks passed · ${checksFailed} checks failed`);
+  log(`TOTAL: ${passed}/${values.length} modules passed · ${failed} failed · ${checksPassed} checks passed · ${checksFailed} checks failed`);
   log(`SUM OF MODULE TIMES: ${fmt(elapsed)} ms (modules ran concurrently)`);
   setProgress(catalog.length + productionCatalog.length, catalog.length + productionCatalog.length, failed ? "COMPLETED WITH FAILURES" : "ALL PASSED");
   notice.textContent = failed ? `Evaluation complete · ${failed} module(s) need attention.` : "Evaluation complete · all modules passed.";
