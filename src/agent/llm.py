@@ -22,16 +22,6 @@ langfuse = Langfuse(
 # MODEL LISTS
 # ============================================================
 
-GROQ_MODELS = [
-    "qwen/qwen3.8-27b",
-    "allam-2-7b",
-    "openai/gpt-oss-20b",
-    "openai/gpt-oss-120b",
-    "groq/compound-mini",
-    "groq/compound",
-]
-
-
 GEMINI_MODELS = [
     "gemini-flash-latest",
     "gemini-2.5-flash",
