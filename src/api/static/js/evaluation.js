@@ -131,7 +131,29 @@ runAllButton.addEventListener("click", async () => {
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));
-  const values = catalog.map(item => results.get(item.id)).filter(Boolean);
+  if (productionCatalog.length) {
+    productionRunning = true;
+    const totalModules = catalog.length + productionCatalog.length;
+    let productionNext = 0, productionCompleted = 0;
+    log("------------------------------------------------------------");
+    log("PRODUCTION PERFORMANCE & RELIABILITY", "heading");
+    productionCatalog.forEach(item => log(`QUEUED  ${item.title}`));
+    const productionWorker = async () => {
+      while (true) {
+        const index = productionNext++;
+        if (index >= productionCatalog.length) return;
+        await executeProductionModule(productionCatalog[index].id);
+        productionCompleted++;
+        setProgress(catalog.length + productionCompleted, totalModules, "ALL TESTS");
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, productionCatalog.length) }, productionWorker));
+    productionRunning = false;
+  }
+  const values = [
+    ...catalog.map(item => results.get(item.id)),
+    ...productionCatalog.map(item => results.get("production:" + item.id))
+  ].filter(Boolean);
   const passed = values.filter(x => x.status === "passed").length;
   const failed = values.filter(x => ["failed", "error"].includes(x.status)).length;
   const checksPassed = values.reduce((sum, x) => sum + (x.checks_passed || 0), 0);
@@ -143,9 +165,13 @@ runAllButton.addEventListener("click", async () => {
     const value = results.get(item.id);
     log(`${value?.status === "passed" ? "PASS" : "FAIL "}  ${item.title} · ${value?.checks_passed || 0}/${(value?.checks_passed || 0) + (value?.checks_failed || 0)} checks · ${fmt(value?.duration_ms || 0)} ms`);
   });
+  productionCatalog.forEach(item => {
+    const value = results.get("production:" + item.id);
+    log(`${value?.status === "passed" ? "PASS" : "FAIL "}  ${item.title} · ${value?.checks_passed || 0}/${(value?.checks_passed || 0) + (value?.checks_failed || 0)} checks · ${fmt(value?.duration_ms || 0)} ms`);
+  });
   log(`TOTAL: ${passed}/${catalog.length} modules passed · ${failed} failed · ${checksPassed} checks passed · ${checksFailed} checks failed`);
   log(`SUM OF MODULE TIMES: ${fmt(elapsed)} ms (modules ran concurrently)`);
-  setProgress(catalog.length, catalog.length, failed ? "COMPLETED WITH FAILURES" : "ALL PASSED");
+  setProgress(catalog.length + productionCatalog.length, catalog.length + productionCatalog.length, failed ? "COMPLETED WITH FAILURES" : "ALL PASSED");
   notice.textContent = failed ? `Evaluation complete · ${failed} module(s) need attention.` : "Evaluation complete · all modules passed.";
   notice.className = `notice ${failed ? "warning" : "success"}`;
   suiteRunning = false;
