@@ -47,3 +47,11 @@ def test_rag_concurrency_uses_bounded_parallelism():
     source = inspect.getsource(run_rag_concurrency)
     assert "asyncio.Semaphore(concurrency)" in source
     assert "asyncio.gather" in source
+
+def test_mocked_failure_suite_verifies_provider_fallback_recovery():
+    import asyncio
+    from src.api.routes.production_evaluation import run_failure_checks
+
+    result = asyncio.run(run_failure_checks())
+    assert all(item["status"] == "passed" for item in result["checks"]), result
+    assert result["metrics"]["fallback_recovered"] is True
