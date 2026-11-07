@@ -17,7 +17,7 @@ init_db()
 
 from src.api.routes import (
     chat, system, upload, memory, transcribe,
-    auth as auth_routes, leads, latency, evaluation,
+    auth as auth_routes, leads, latency, evaluation, production_evaluation,
 )
 from src.tools.mcp_server import mcp_server, registered_mcp_tool_names
 from mcp.server.transport_security import TransportSecuritySettings
@@ -134,6 +134,7 @@ app.include_router(auth_routes.router)
 app.include_router(leads.router)
 app.include_router(latency.router)
 app.include_router(evaluation.router)
+app.include_router(production_evaluation.router)
 
 
 @app.head("/health")
