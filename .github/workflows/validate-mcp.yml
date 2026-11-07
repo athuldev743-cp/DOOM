@@ -12,6 +12,10 @@ on:
       - "src/agent/llm_fallback.py"
       - "src/api/routes/latency.py"
       - "src/api/routes/transcribe.py"
+      - "src/api/routes/production_evaluation.py"
+      - "src/api/static/js/evaluation.js"
+      - "evaluation/test_dashboard.py"
+      - "evaluation/test_production_evaluation.py"
       - "tests/test_llm_fallback.py"
       - "tests/test_mcp_server_adapter.py"
       - "requirements.txt"
@@ -44,6 +48,7 @@ jobs:
       - name: Compile MCP integration
         run: |
           python -m py_compile src/tools/mcp_server.py src/api/app.py src/memory/database.py src/agent/llm_fallback.py src/api/routes/latency.py src/api/routes/transcribe.py
+            src/api/routes/production_evaluation.py
       - name: Verify all 26 registered tools are exposed by the MCP adapter
         run: |
           python - <<'PY'
@@ -104,6 +109,15 @@ jobs:
           asyncio.run(verify_mcp_auth())
           print("FastAPI app imported; unauthenticated MCP requests are rejected.")
           PY
-      - name: Test tool registration, schema validation, and argument binding
+      - name: Check evaluation dashboard JavaScript syntax
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validate evaluation JavaScript
+        run: node --input-type=module --check < src/api/static/js/evaluation.js
+      - name: Test MCP and evaluation suites
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-evaluation-ci.db
+          SESSION_SECRET: ci-test-session-secret
         run: |
-          python -m pytest -q tests/test_mcp_server_adapter.py tests/test_llm_fallback.py
+          python -m pytest -q tests/test_mcp_server_adapter.py tests/test_llm_fallback.py evaluation/test_dashboard.py evaluation/test_production_evaluation.py
