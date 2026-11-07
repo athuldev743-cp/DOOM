@@ -14,7 +14,7 @@ Owner-only evaluation console available at /evaluation after deployment.
 ## Running
 
 - Sign in as the owner and open /evaluation.
-- Run one card or select Run all tests.
+- Run one card or select Run all tests.\n- The live terminal prints module start/completion, each check, report paths and a final summary.\n- Run all uses three workers in parallel to balance speed with production database/provider load.
 - Set the count on each card before running.
 - Reports are written under evaluation/results/deployed/ when the server filesystem is writable.
 
@@ -41,3 +41,14 @@ k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=5 -e ITERATIONS
 ```
 
 k6 reports request duration percentiles, request rate, failed-request rate and iteration throughput. The default thresholds are p95 below 1500 ms, p99 below 3000 ms and failures below 1%; tune them to the service's agreed SLOs before treating them as release gates.
+
+
+## Real MCP transport test
+
+The dashboard's MCP module measures in-process adapters. To verify the deployed Streamable HTTP protocol itself, run this k6 script from an external machine. It performs initialize, initialized notification and tools/list using an owner session token:
+
+```powershell
+k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e DOOM_SESSION="$env:DOOM_SESSION" -e VUS=1 -e ITERATIONS=3 evaluation/k6/mcp-streamable-http.js
+```
+
+Set `DOOM_SESSION` in your local PowerShell session first. Never paste the token into source code or commit it. This test checks the real remote MCP transport and owner authentication; it is separate from the in-process dashboard module.

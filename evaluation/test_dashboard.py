@@ -39,3 +39,21 @@ def test_langgraph_evaluation_context_blocks_tool_side_effects():
     )
     result = asyncio.run(validate_args_node(state))
     assert result["validation_error"] == "Tool execution is disabled during evaluation."
+
+
+def test_terminal_runner_uses_parallel_workers_and_reports_each_module():
+    from pathlib import Path
+
+    script = Path("src/api/static/js/evaluation.js").read_text(encoding="utf-8")
+    assert "Promise.all(Array.from({ length: concurrency }, worker))" in script
+    assert "FINAL SUMMARY" in script
+    assert "checks_passed" in script
+    assert "MODULES COMPLETE" in script
+
+
+def test_evaluation_page_contains_live_terminal():
+    from pathlib import Path
+
+    page = Path("src/api/evaluation.html").read_text(encoding="utf-8")
+    assert 'id="terminal-output"' in page
+    assert 'id="terminal-meta"' in page
