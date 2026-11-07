@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#080808">
   <title>DOOM · Evaluation</title>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/evaluation.css?v=20261107-eval1">
+  <link rel="stylesheet" href="/static/evaluation.css?v=20261107-terminal1">
 </head>
 <body>
   <main class="eval-shell">
@@ -30,6 +30,10 @@
       <button id="run-all" class="primary">▶ Run all tests</button>
     </section>
     <div id="notice" class="notice" role="status">Loading evaluation modules…</div>
+    <section class="terminal-panel" aria-label="Live test terminal">
+      <div class="terminal-head"><div><span class="terminal-lights">● ● ●</span><b>DOOM TEST RUNNER</b></div><span id="terminal-meta">READY</span></div>
+      <pre id="terminal-output" class="terminal-output" role="log" aria-live="polite">Loading test runner…</pre>
+    </section>
     <section id="test-grid" class="test-grid" aria-live="polite"></section>
     <section class="scope-note">
       <h3>Measurement boundaries</h3>
@@ -38,6 +42,6 @@
     </section>
     <footer>DOOM AI · OWNER-ONLY EVALUATION CONSOLE</footer>
   </main>
-  <script type="module" src="/static/js/evaluation.js?v=20261107-eval1"></script>
+  <script type="module" src="/static/js/evaluation.js?v=20261107-terminal1"></script>
 </body>
 </html>
