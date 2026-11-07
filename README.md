@@ -16,20 +16,20 @@ Most "AI assistant" demos wrap a single LLM call with a chat UI. DOOM is built a
 
 ```
 ┌──────────────┐     ┌─────────────────────┐     ┌──────────────────┐
-│  CLI / Voice  │────►│   Agent Core (ReAct)  │────►│  26-Tool Registry │
-│  or Web API   │     │  src/agent/core.py    │     │  src/tools/       │
+│  CLI / Voice  │────►│  LangGraph Agent     │────►│  26-Tool Registry │
+│  or Web API   │     │  src/agent/graph.py   │     │  src/tools/       │
 └──────────────┘     └──────────┬────────────┘     └──────────────────┘
                                  │
                     ┌────────────┼────────────┐
                     ▼            ▼             ▼
-             ┌───────────┐ ┌──────────┐ ┌──────────────┐
-             │ Multi-LLM │ │ RAG /    │ │ SQLite Memory │
-             │ Fallback  │ │ ChromaDB │ │ + Profile     │
-             │ Chain     │ │          │ │ Store         │
-             └───────────┘ └──────────┘ └──────────────┘
+             ┌───────────┐ ┌──────────────────┐ ┌──────────────┐
+             │ Multi-LLM │ │ PostgreSQL RAG   │ │ PostgreSQL   │
+             │ Fallback  │ │ pgvector + FTS   │ │ Memory /     │
+             │ Chain     │ │ RRF fusion       │ │ Profile      │
+             └───────────┘ └──────────────────┘ └──────────────┘
 ```
 
-- **Agent core**: a ReAct-style loop — the LLM decides whether to call a tool (`TOOL: name` / `ARGS: ...`) or answer directly, tool results get fed back for a final grounded response
+- **Agent core**: a LangGraph state machine — the LLM decides whether to answer or call a tool; tool arguments are parsed and validated before execution; malformed or invalid calls enter a bounded retry path; tool results are formatted into the final response
 - **LLM layer**: cascading fallback across 4 providers, 14 total model attempts, so the assistant stays available even under rate limits or provider outages, with full call tracing via Langfuse (see below)
 - **Tool registry**: 26 active tools across job search, email, WhatsApp, contacts, reminders, PC automation, document RAG, and daily briefings
 - **Memory**: PostgreSQL (SQLAlchemy) for conversation history, user profile, and job data; injected into the system prompt on every turn
@@ -67,7 +67,7 @@ The MCP layer is an adapter around the existing tools. The custom ReAct/LangGrap
 | Rolling job pool | Maximum 50 matches |
 | Application preparation | Maximum 5 pending review documents |
 | Generated CV retention | Completed application PDFs are cleared after 30 days |
-| RAG chunking | 500 words per chunk with 50-word overlap; top 3 results by default |
+| RAG chunking | 450 words per chunk with 60-word overlap; top 3 results by default |
 
 These are implementation settings and capacity limits, not live performance measurements. Actual response latency must be measured from production traces after the FastAPI Cloud deployment is confirmed.
 
@@ -128,19 +128,61 @@ The timeouts are configurable through environment variables. The actual latency 
 
 ## RAG pipeline
 
-Document retrieval for grounding responses in Athul's real documents (resume, personal docs):
+DOOM grounds document answers with a PostgreSQL-backed hybrid retrieval pipeline:
 
-- **Embedding model**: `all-MiniLM-L6-v2` via SentenceTransformers
-- **Vector store**: ChromaDB, persisted locally
-- **Ingestion**: PDF text extraction via PyMuPDF (`fitz`), plain text/markdown support, chunked at 500 words with 50-word overlap to preserve context across chunk boundaries
-- **Re-ingestion safety**: ingesting a file that's already indexed deletes its old chunks first (matched by source filename) before re-adding, preventing duplicate/stale chunks from accumulating
-- **Query**: top-k semantic search (default 3 results) returned with source attribution
+- **Embedding model**: `BAAI/bge-small-en-v1.5` through FastEmbed, producing 384-dimensional vectors
+- **Vector store**: PostgreSQL with the pgvector extension
+- **Lexical retrieval**: PostgreSQL full-text search using `websearch_to_tsquery` and a generated search vector
+- **Fusion**: Reciprocal Rank Fusion (RRF, currently `k = 60`) combines vector and lexical candidate rankings
+- **Ingestion**: PDF extraction with PyMuPDF plus TXT/Markdown support; 450-word chunks with 60-word overlap
+- **Storage**: source name, chunk index, content, content hash, and embedding are stored in the `doom_document_chunks` table
+- **Query**: vector and lexical candidates are fused and the top results are returned with source and chunk attribution
+
+The production retrieval implementation is in `src/memory/rag.py`. The active store is PostgreSQL/pgvector; ChromaDB is not part of the current DOOM RAG path.
 
 ---
 
+
+## Engineering evaluation
+
+The repository includes repeatable local evaluations for retrieval, agent decisions, API health and external MCP/RAG request flows.
+
+### RAG retrieval benchmark
+
+A 50-query curated benchmark compares vector-only, PostgreSQL lexical-only and hybrid retrieval. Queries cover direct questions, keyword-poor wording, multi-hop questions, paraphrases and technical identifiers.
+
+| Metric | Vector-only | Lexical-only | Hybrid (RRF) |
+|---|---:|---:|---:|
+| Hit@5 | 96% | 20% | 96% |
+| MRR@5 | 0.912 | 0.200 | 0.902 |
+| Mean SQL execution | 576.5 ms | 293.2 ms | 291.7 ms |
+| SQL p95 | 707.2 ms | 393.1 ms | 358.2 ms |
+
+**Interpretation:** Hybrid retrieval matched vector-only Hit@5 on this dataset; vector-only had a slightly higher MRR. Lexical-only retrieval was substantially weaker. These results do not show that RRF improved ranking quality. The benchmark uses curated expected-source labels, not human-judged passage relevance. SQL timings are local sequential-run measurements, not production end-to-end latency.
+
+### Agent decision evaluation
+
+A 20-task real-LLM evaluation exercised tool selection, argument parsing/validation and LangGraph retry routing. It recorded 95% task completion, 90% first-attempt accuracy and 95% final tool-selection accuracy. Mean decision latency was approximately 896 ms, with a 1.49 s p95.
+
+This is a small evaluation sample. Tool execution was safely mocked, so these figures measure decision/orchestration behavior and must not be represented as end-to-end success rates for real external actions.
+
+### API and regression checks
+
+- Local test suite: **50 tests passed** at the time of this evaluation update.
+- k6 health-endpoint run: 5 virtual users for 1 minute; 0% failed checks and 391 ms p95. This measures the health endpoint only, not RAG or agent response latency.
+- The repository includes separate k6 workloads for MCP initialization and RAG execution. Their scripts are test assets; results must be reported only after the workload is actually run against the target deployment.
+
+Run the local checks with:
+
+```powershell
+python -m pytest -q
+python -m py_compile evaluation/run_all.py evaluation/run_agent_quality_20.py evaluation/run_agent_quality_v2.py evaluation/run_rag_50_benchmark.py
+```
+
+
 ## Tool-calling discipline
 
-The system prompt encodes a strict protocol rather than relying on the model's native function-calling: exact TOOL: name / ARGS: value output format, explicit rules against hallucinating job listings, and a separation between job discovery and application actions.
+The LangGraph agent uses a strict `TOOL:` / `ARGS:` output protocol rather than relying only on native model function-calling. Tool arguments pass through parsing and Pydantic validation before the application executes a tool. Unknown tools, malformed calls, and invalid arguments are routed through a bounded retry path (maximum two retries). Ordinary responses bypass tool execution.
 
 After a tool runs, its raw result is fed back to the LLM with explicit formatting instructions — present only what the tool returned, never invent additional results — rather than letting the model freely narrate. Application preparation, document approval, email sending, and platform submission are owner-authenticated API actions outside the LLM tool loop.
 
@@ -166,9 +208,9 @@ After a tool runs, its raw result is fed back to the LLM with explicit formattin
 
 | Layer | Technology |
 |---|---|
-| Agent framework | Custom ReAct-style loop with LangGraph orchestration |
+| Agent framework | LangGraph state graph with validation, bounded retries, tool execution and response nodes |
 | LLM providers | Gemini, OpenAI, Groq, OpenRouter (cascading fallback) |
-| RAG | ChromaDB, SentenceTransformers, PyMuPDF |
+| RAG | PostgreSQL, pgvector, PostgreSQL full-text search, RRF, FastEmbed, PyMuPDF |
 | Memory | PostgreSQL (SQLAlchemy) |
 | API / MCP transport | FastAPI, official MCP Python SDK v2, Streamable HTTP |
 | Observability | Langfuse (self-hosted via Docker + cloud) |
@@ -212,7 +254,6 @@ MCP_ALLOWED_HOSTS=doom-1a9d9743.fastapicloud.dev,doom-1a9d9743.fastapicloud.dev:
 MCP_ALLOWED_ORIGINS=https://doom-1a9d9743.fastapicloud.dev
 CORS_ALLOWED_ORIGINS=https://doom-1a9d9743.fastapicloud.dev
 DOCS_UPLOAD_MAX_BYTES=10485760
-CHROMA_PATH=./data/chroma
 DOCS_PATH=./data/documents
 ```
 
@@ -225,18 +266,24 @@ Gmail API access requires a separate `credentials.json` (OAuth client) obtained 
 ```
 src/
 ├── agent/
-│   ├── core.py          # ReAct loop, tool dispatch, response formatting
-│   └── llm.py            # Multi-provider fallback chain
-├── api/                  # FastAPI app + routes (chat, upload, transcribe, LinkedIn)
+│   ├── graph.py           # LangGraph decision, validation, retry and execution flow
+│   ├── llm.py             # Multi-provider LLM selection
+│   └── llm_fallback.py    # Provider fallback and timeout controller
+├── api/                   # FastAPI app and routes
 ├── memory/
-│   ├── database.py       # PostgreSQL-backed application and memory data
-│   ├── manager.py        # Memory read/write orchestration
-│   ├── profile.py        # Persistent user profile store
-│   ├── extractor.py       # Background fact extraction from conversations
-│   └── rag.py              # ChromaDB ingestion + semantic search
-├── tools/                 # 26 registered tools + MCP adapter
-├── voice/                  # STT/TTS
-└── scripts/                 # Scheduled jobs (morning digest, job scanning)
+│   ├── database.py        # PostgreSQL / SQLAlchemy engine
+│   ├── manager.py         # Conversation memory orchestration
+│   ├── profile.py         # Persistent user profile
+│   └── rag.py             # FastEmbed + pgvector + PostgreSQL FTS + RRF
+├── tools/                 # Tool registry, schemas and MCP adapter
+├── voice/                 # Speech input/output
+└── scripts/               # Scheduled jobs and background workflows
+
+evaluation/
+├── k6/                    # External MCP and RAG load-test workloads
+├── run_agent_quality_v2.py
+├── run_rag_50_benchmark.py
+└── run_all.py             # Unified evaluation runner
 ```
 
 ---
