@@ -118,6 +118,17 @@ jobs:
           node-version: "20"
       - name: Validate evaluation JavaScript
         run: node --input-type=module --check < src/api/static/js/evaluation.js
+      - name: Initialize isolated evaluation test database
+        env:
+          DATABASE_URL: sqlite:////tmp/doom-evaluation-ci.db
+        run: |
+          python - <<'PY'
+          from src.memory.profile import UserProfile
+          from src.tools.reminder import Reminder
+          from src.memory.database import init_db
+          init_db()
+          print("Initialized isolated SQLite schema for evaluation tests.")
+          PY
       - name: Test MCP and evaluation suites
         env:
           DATABASE_URL: sqlite:////tmp/doom-evaluation-ci.db
