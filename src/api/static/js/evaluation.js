@@ -89,7 +89,7 @@ async function executeModule(id, requestCount) {
   }
 }
 async function runOne(id) {
-  if (suiteRunning || results.get(id)?.status === "running") return;
+  if (suiteRunning || productionRunning || results.get(id)?.status === "running") return;
   const item = catalog.find(x => x.id === id);
   if (!item) return;
   const input = document.getElementById(`count-${id}`);
@@ -101,7 +101,7 @@ async function runOne(id) {
   notice.className = `notice ${data.status === "passed" ? "success" : "warning"}`;
 }
 runAllButton.addEventListener("click", async () => {
-  if (suiteRunning || !catalog.length) return;
+  if (suiteRunning || productionRunning || !catalog.length) return;
   suiteRunning = true;
   results.clear();
   logLines = [];
