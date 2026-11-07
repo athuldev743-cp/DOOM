@@ -89,7 +89,7 @@ async function executeModule(id, requestCount) {
   }
 }
 async function runOne(id) {
-  if (suiteRunning || results.get(id)?.status === "running") return;
+  if (suiteRunning || productionRunning || results.get(id)?.status === "running") return;
   const item = catalog.find(x => x.id === id);
   if (!item) return;
   const input = document.getElementById(`count-${id}`);
@@ -101,7 +101,7 @@ async function runOne(id) {
   notice.className = `notice ${data.status === "passed" ? "success" : "warning"}`;
 }
 runAllButton.addEventListener("click", async () => {
-  if (suiteRunning || !catalog.length) return;
+  if (suiteRunning || productionRunning || !catalog.length) return;
   suiteRunning = true;
   results.clear();
   logLines = [];
@@ -131,7 +131,29 @@ runAllButton.addEventListener("click", async () => {
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));
-  const values = catalog.map(item => results.get(item.id)).filter(Boolean);
+  if (productionCatalog.length) {
+    productionRunning = true;
+    const totalModules = catalog.length + productionCatalog.length;
+    let productionNext = 0, productionCompleted = 0;
+    log("------------------------------------------------------------");
+    log("PRODUCTION PERFORMANCE & RELIABILITY", "heading");
+    productionCatalog.forEach(item => log(`QUEUED  ${item.title}`));
+    const productionWorker = async () => {
+      while (true) {
+        const index = productionNext++;
+        if (index >= productionCatalog.length) return;
+        await executeProductionModule(productionCatalog[index].id);
+        productionCompleted++;
+        setProgress(catalog.length + productionCompleted, totalModules, "ALL TESTS");
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, productionCatalog.length) }, productionWorker));
+    productionRunning = false;
+  }
+  const values = [
+    ...catalog.map(item => results.get(item.id)),
+    ...productionCatalog.map(item => results.get("production:" + item.id))
+  ].filter(Boolean);
   const passed = values.filter(x => x.status === "passed").length;
   const failed = values.filter(x => ["failed", "error"].includes(x.status)).length;
   const checksPassed = values.reduce((sum, x) => sum + (x.checks_passed || 0), 0);
@@ -143,9 +165,13 @@ runAllButton.addEventListener("click", async () => {
     const value = results.get(item.id);
     log(`${value?.status === "passed" ? "PASS" : "FAIL "}  ${item.title} · ${value?.checks_passed || 0}/${(value?.checks_passed || 0) + (value?.checks_failed || 0)} checks · ${fmt(value?.duration_ms || 0)} ms`);
   });
-  log(`TOTAL: ${passed}/${catalog.length} modules passed · ${failed} failed · ${checksPassed} checks passed · ${checksFailed} checks failed`);
+  productionCatalog.forEach(item => {
+    const value = results.get("production:" + item.id);
+    log(`${value?.status === "passed" ? "PASS" : "FAIL "}  ${item.title} · ${value?.checks_passed || 0}/${(value?.checks_passed || 0) + (value?.checks_failed || 0)} checks · ${fmt(value?.duration_ms || 0)} ms`);
+  });
+  log(`TOTAL: ${passed}/${values.length} modules passed · ${failed} failed · ${checksPassed} checks passed · ${checksFailed} checks failed`);
   log(`SUM OF MODULE TIMES: ${fmt(elapsed)} ms (modules ran concurrently)`);
-  setProgress(catalog.length, catalog.length, failed ? "COMPLETED WITH FAILURES" : "ALL PASSED");
+  setProgress(catalog.length + productionCatalog.length, catalog.length + productionCatalog.length, failed ? "COMPLETED WITH FAILURES" : "ALL PASSED");
   notice.textContent = failed ? `Evaluation complete · ${failed} module(s) need attention.` : "Evaluation complete · all modules passed.";
   notice.className = `notice ${failed ? "warning" : "success"}`;
   suiteRunning = false;
@@ -172,3 +198,140 @@ async function init() {
   }
 }
 init();
+
+
+// Production evaluation suite: separate from the six fast baseline modules.
+let productionCatalog = [];
+let productionRunning = false;
+const productionGrid = document.getElementById("production-grid");
+const productionRunAll = document.getElementById("run-production-all");
+const safeNumber = (id, fallback, min, max) => Math.max(min, Math.min(max, Number(document.getElementById(id)?.value || fallback)));
+function productionConfig() {
+  return {
+    concurrency: safeNumber("production-concurrency", 3, 1, 10),
+    requests: safeNumber("production-requests", 12, 1, 40),
+    runs: safeNumber("production-runs", 1, 1, 2)
+  };
+}
+function renderProductionCards() {
+  if (!productionGrid) return;
+  productionGrid.innerHTML = productionCatalog.map(item => {
+    const result = results.get("production:" + item.id);
+    const state = result?.status || "idle";
+    const details = result ? `<div class="result-block"><div class="result-summary"><b>${result.checks_passed || 0} passed</b><span>${result.checks_failed || 0} failed</span><small>${fmt(result.duration_ms)} ms</small></div>${result.error ? `<div class="error">${escapeHtml(result.error)}</div>` : ""}<div class="metrics">${metricMarkup(result.metrics)}</div>${checkMarkup(result.checks)}</div>` : "";
+    return `<article class="test-card"><div class="card-head"><div class="test-icon">⌁</div><div class="card-title"><h3>${escapeHtml(item.title)}</h3><span>PRODUCTION TEST</span></div><span class="status-pill ${state}">${state.toUpperCase()}</span></div><p class="description">${escapeHtml(item.description)}</p><button class="run-one" data-production-run="${escapeHtml(item.id)}" ${productionRunning ? "disabled" : ""}>Run test →</button>${details}</article>`;
+  }).join("");
+  productionGrid.querySelectorAll("[data-production-run]").forEach(button => button.addEventListener("click", () => runProductionOne(button.dataset.productionRun)));
+}
+async function executeProductionModule(id) {
+  const item = productionCatalog.find(entry => entry.id === id);
+  if (!item) return null;
+  const started = performance.now();
+  const config = productionConfig();
+  log(`▶ PRODUCTION / ${item.title.toUpperCase()} — STARTED`);
+  try {
+    const response = await fetch(`/evaluation/production/run/${encodeURIComponent(id)}`, {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(config)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
+    results.set("production:" + id, data);
+    log(`${data.status === "passed" ? "✓" : "✗"} ${item.title.toUpperCase()} — ${data.status.toUpperCase()} · ${data.checks_passed} passed · ${data.checks_failed} failed · ${fmt(data.duration_ms)} ms`, data.status);
+    (data.checks || []).forEach(check => log(`   ${check.status === "passed" ? "✓" : "✗"} ${check.name}${check.detail ? " — " + check.detail : ""}`, check.status));
+    Object.entries(data.metrics || {}).forEach(([key, value]) => {
+      if (key === "node_timings") value.forEach(node => log(`   NODE ${node.node}: ${node.calls} calls · avg ${node.avg_ms} ms · p95 ${node.p95_ms} ms`));
+      else if (typeof value !== "object") log(`   ${metricLabel(key)}: ${fmt(value)}`);
+    });
+    if (data.error) log(`   ERROR: ${data.error}`, "error");
+    return data;
+  } catch (error) {
+    const data = { test_id: id, status: "error", duration_ms: Math.round(performance.now() - started), checks_passed: 0, checks_failed: 1, error: error.message, checks: [], metrics: {} };
+    results.set("production:" + id, data);
+    log(`✗ ${item.title.toUpperCase()} — ERROR · ${error.message}`, "error");
+    return data;
+  } finally {
+    renderProductionCards();
+  }
+}
+async function runProductionOne(id) {
+  if (productionRunning || suiteRunning) return;
+  productionRunning = true;
+  productionRunAll.disabled = true;
+  renderProductionCards();
+  await executeProductionModule(id);
+  productionRunning = false;
+  productionRunAll.disabled = false;
+  renderProductionCards();
+}
+if (productionRunAll) productionRunAll.addEventListener("click", async () => {
+  if (productionRunning || suiteRunning || !productionCatalog.length) return;
+  productionRunning = true;
+  suiteRunning = true;
+  runAllButton.disabled = true;
+  productionRunAll.disabled = true;
+  logLines = [];
+  terminal.textContent = "";
+  log("DOOM PRODUCTION PERFORMANCE & RELIABILITY", "heading");
+  const concurrency = Math.min(2, productionCatalog.length);
+  log(`Target: LIVE DEPLOYED BACKEND · Parallel workers: ${concurrency}`);
+  productionCatalog.forEach(item => log(`QUEUED  ${item.title}`));
+  let next = 0, completed = 0;
+  const worker = async () => {
+    while (true) {
+      const index = next++;
+      if (index >= productionCatalog.length) return;
+      await executeProductionModule(productionCatalog[index].id);
+      completed++;
+      setProgress(completed, productionCatalog.length, "PRODUCTION");
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  const values = productionCatalog.map(item => results.get("production:" + item.id)).filter(Boolean);
+  const passed = values.filter(value => value.status === "passed").length;
+  log("------------------------------------------------------------");
+  log(`PRODUCTION SUMMARY: ${passed}/${productionCatalog.length} passed · ${productionCatalog.length - passed} failed`, "heading");
+  setProgress(productionCatalog.length, productionCatalog.length, passed === productionCatalog.length ? "ALL PASSED" : "COMPLETED WITH FAILURES");
+  productionRunning = false;
+  suiteRunning = false;
+  runAllButton.disabled = false;
+  productionRunAll.disabled = false;
+  renderProductionCards();
+});
+async function initProduction() {
+  if (!productionGrid) return;
+  try {
+    const response = await fetch("/evaluation/production/catalog", { credentials: "same-origin", cache: "no-store" });
+    if (!response.ok) throw new Error(`Production catalog HTTP ${response.status}`);
+    const data = await response.json();
+    productionCatalog = data.tests || [];
+    renderProductionCards();
+    log(`${productionCatalog.length} production modules loaded. External k6 tests are configured below.`);
+  } catch (error) {
+    productionGrid.innerHTML = `<div class="notice warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+function updateK6Commands() {
+  const vus = safeNumber("k6-vus", 5, 1, 50);
+  const duration = document.getElementById("k6-duration")?.value || "1m";
+  const token = document.getElementById("k6-token")?.value || "";
+  document.getElementById("k6-load-command").textContent = `k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=${vus} -e DURATION=${duration} evaluation/k6/production-load.js`;
+  document.getElementById("k6-mcp-command").textContent = token
+    ? `$env:DOOM_SESSION = "${token}"; k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e DOOM_SESSION="$env:DOOM_SESSION" -e VUS=1 -e ITERATIONS=3 evaluation/k6/mcp-streamable-http.js`
+    : "Set your owner session token in the field above to generate this command.";
+}
+["k6-vus", "k6-duration", "k6-token"].forEach(id => document.getElementById(id)?.addEventListener("input", updateK6Commands));
+document.getElementById("copy-k6-load")?.addEventListener("click", async () => {
+  updateK6Commands();
+  await navigator.clipboard.writeText(document.getElementById("k6-load-command").textContent);
+  log("Copied public k6 command. Run it in PowerShell on your PC.");
+});
+document.getElementById("copy-k6-mcp")?.addEventListener("click", async () => {
+  updateK6Commands();
+  const command = document.getElementById("k6-mcp-command").textContent;
+  if (command.startsWith("Set your")) { log("Enter the owner session token locally before copying the MCP command.", "warning"); return; }
+  await navigator.clipboard.writeText(command);
+  log("Copied MCP command. The token is only copied to your local clipboard; never share it.");
+});
+updateK6Commands();
+initProduction();

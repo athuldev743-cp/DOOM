@@ -52,3 +52,33 @@ k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e DOOM_SESSION="$env:
 ```
 
 Set `DOOM_SESSION` in your local PowerShell session first. Never paste the token into source code or commit it. This test checks the real remote MCP transport and owner authentication; it is separate from the in-process dashboard module.
+
+
+## Production performance & reliability
+
+Open **Production Performance & Reliability** on the evaluation page. The in-dashboard modules are owner-only and have hard limits:
+- RAG concurrent load: up to 10 concurrent read-only retrievals, 40 requests.
+- LangGraph node tracing: 1–2 graph runs; records each node's calls, average, p95 and max duration. The decide node includes LLM provider time.
+- Failure handling: injects mocked database timeout, embedding failure and provider outage. It does not interrupt live services.
+- Security expansion: synthetic expired/wrong-owner JWTs, guest evaluation access and guest MCP access. It never revokes a real session.
+
+### Public-network k6 test
+
+A browser/server dashboard cannot launch k6 on your PC. Run this from PowerShell on a machine outside the deployed server to measure the real public route. It reports public HTTP latency percentiles, request rate, failed-request rate and VU count.
+
+```powershell
+k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e VUS=5 -e DURATION=1m evaluation/k6/production-load.js
+```
+
+Adjust `VUS` (1–50) and `DURATION` (for example `30s`, `1m`, `3m`). Start with 5 VUs and 1 minute; do not begin with a large stress test on production.
+
+### MCP Streamable HTTP protocol test
+
+This test performs the remote initialize → initialized → tools/list flow. It requires a valid owner session token in the local PowerShell environment:
+
+```powershell
+$env:DOOM_SESSION = "YOUR_OWNER_SESSION_TOKEN"
+k6 run -e BASE_URL=https://doom-1a9d9743.fastapicloud.dev -e DOOM_SESSION="$env:DOOM_SESSION" -e VUS=1 -e ITERATIONS=3 evaluation/k6/mcp-streamable-http.js
+```
+
+The token is passed at runtime only. Never put it in source files, logs, screenshots or commits.
