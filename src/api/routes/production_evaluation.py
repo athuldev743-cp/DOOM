@@ -156,10 +156,44 @@ async def run_failure_checks() -> dict:
         except RuntimeError as exc:
             provider_failed_safely = "synthetic provider outage" in str(exc)
     checks.append(check("Provider failure is surfaced (mocked)", provider_failed_safely))
+
+    # Exercise the actual fallback-chain policy with synthetic providers:
+    # provider A fails, provider B succeeds. No network calls or API keys.
+    from contextlib import AbstractContextManager
+    from src.agent.llm_fallback import LLMFallbackChain
+
+    class FakeSpan(AbstractContextManager):
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def update(self, **kwargs): return None
+
+    class FakeLangfuse:
+        def start_as_current_observation(self, **kwargs): return FakeSpan()
+        def flush(self): return None
+
+    class FakeProvider:
+        def __init__(self, name, result=None, should_fail=False):
+            self.name, self.result, self.should_fail = name, result, should_fail
+        def models(self): return [self.name + "-model"]
+        def complete(self, model, messages, timeout):
+            if self.should_fail:
+                raise RuntimeError("synthetic provider unavailable")
+            return self.result
+
+    fallback_chain = LLMFallbackChain(
+        providers=[FakeProvider("primary", should_fail=True), FakeProvider("backup", result="recovered")],
+        langfuse_client=FakeLangfuse(), fail_message="all providers failed",
+        total_timeout_seconds=5, attempt_timeout_seconds=1,
+    )
+    fallback_response = await fallback_chain.chat(messages)
+    fallback_recovered = fallback_response == "recovered"
+    checks.append(check("Fallback provider recovers after primary failure", fallback_recovered,
+                        f"response={fallback_response}"))
     return {"checks": checks, "metrics": {
         "faults_injected": 3, "database_timeout_handled": db_failed_safely,
         "embedding_failure_handled": embedding_failed_safely, "provider_failure_handled": provider_failed_safely,
-        "scope": "Synthetic mocked faults only. No live database, embedding service or provider is disrupted."
+        "fallback_recovered": fallback_recovered,
+        "scope": "Synthetic mocked faults and providers only. No live database, embedding service or provider is disrupted."
     }}
 
 
