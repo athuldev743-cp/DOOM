@@ -70,7 +70,10 @@ async function executeModule(id, requestCount) {
       method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request_count: requestCount })
     });
-    const data = await response.json();
+    const rawBody = await response.text();
+    let data;
+    try { data = rawBody ? JSON.parse(rawBody) : {}; }
+    catch { throw new Error(`HTTP ${response.status}: non-JSON response: ${rawBody.slice(0, 240) || "(empty body)"}`); }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
     results.set(id, data);
     const mark = data.status === "passed" ? "PASS" : "FAIL";
@@ -112,25 +115,34 @@ runAllButton.addEventListener("click", async () => {
     const input = document.getElementById(`count-${item.id}`);
     return [item.id, Math.max(1, Math.min(item.max_count, Number(input?.value || item.default_count)))];
   }));
-  const concurrency = Math.min(3, catalog.length);
-  let next = 0, completed = 0;
+  const heavyIds = new Set(["rag", "mcp", "langgraph", "database"]);
+  const lightItems = catalog.filter(item => !heavyIds.has(item.id));
+  const heavyItems = catalog.filter(item => heavyIds.has(item.id));
+  let completed = 0;
   setProgress(0, catalog.length);
   log("DOOM ENGINEERING EVALUATION", "heading");
-  log(`Target: LIVE DEPLOYED BACKEND · Parallel workers: ${concurrency}`);
+  log("Target: LIVE DEPLOYED BACKEND · Lightweight workers: 2 · Heavy workers: 1 (sequential)");
   log("------------------------------------------------------------");
-  catalog.forEach(item => log(`QUEUED  ${item.title}`));
+  catalog.forEach(item => log(`QUEUED  ${item.title} · ${heavyIds.has(item.id) ? "HEAVY / SEQUENTIAL" : "LIGHT / PARALLEL"}`));
   render();
-  const worker = async () => {
+  const lightWorker = async (items) => {
+    let next = 0;
     while (true) {
       const index = next++;
-      if (index >= catalog.length) return;
-      const item = catalog[index];
+      if (index >= items.length) return;
+      const item = items[index];
       await executeModule(item.id, counts[item.id]);
       completed++;
       setProgress(completed, catalog.length);
     }
   };
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  await Promise.all(Array.from({ length: Math.min(2, lightItems.length) }, () => lightWorker(lightItems)));
+  for (const item of heavyItems) {
+    log(`HEAVY QUEUE: starting ${item.title} after previous heavy test completed.`);
+    await executeModule(item.id, counts[item.id]);
+    completed++;
+    setProgress(completed, catalog.length);
+  }
   if (productionCatalog.length) {
     productionRunning = true;
     const totalModules = catalog.length + productionCatalog.length;
@@ -184,7 +196,10 @@ async function init() {
     const response = await fetch("/evaluation/api/catalog", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 403 || response.status === 401) { location.href = "/"; return; }
     if (!response.ok) throw new Error(`Catalog request failed: HTTP ${response.status}`);
-    const data = await response.json();
+    const rawBody = await response.text();
+    let data;
+    try { data = rawBody ? JSON.parse(rawBody) : {}; }
+    catch { throw new Error(`HTTP ${response.status}: non-JSON response: ${rawBody.slice(0, 240) || "(empty body)"}`); }
     catalog = data.tests || [];
     render();
     log("DOOM evaluation console ready.");
@@ -234,7 +249,10 @@ async function executeProductionModule(id) {
       method: "POST", credentials: "same-origin",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(config)
     });
-    const data = await response.json();
+    const rawBody = await response.text();
+    let data;
+    try { data = rawBody ? JSON.parse(rawBody) : {}; }
+    catch { throw new Error(`HTTP ${response.status}: non-JSON response: ${rawBody.slice(0, 240) || "(empty body)"}`); }
     if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
     results.set("production:" + id, data);
     log(`${data.status === "passed" ? "✓" : "✗"} ${item.title.toUpperCase()} — ${data.status.toUpperCase()} · ${data.checks_passed} passed · ${data.checks_failed} failed · ${fmt(data.duration_ms)} ms`, data.status);
@@ -273,20 +291,23 @@ if (productionRunAll) productionRunAll.addEventListener("click", async () => {
   logLines = [];
   terminal.textContent = "";
   log("DOOM PRODUCTION PERFORMANCE & RELIABILITY", "heading");
-  const concurrency = Math.min(2, productionCatalog.length);
-  log(`Target: LIVE DEPLOYED BACKEND · Parallel workers: ${concurrency}`);
+  log("Target: LIVE DEPLOYED BACKEND · Heavy tests: sequential · Lightweight checks: parallel");
   productionCatalog.forEach(item => log(`QUEUED  ${item.title}`));
-  let next = 0, completed = 0;
-  const worker = async () => {
-    while (true) {
-      const index = next++;
-      if (index >= productionCatalog.length) return;
-      await executeProductionModule(productionCatalog[index].id);
-      completed++;
-      setProgress(completed, productionCatalog.length, "PRODUCTION");
-    }
-  };
-  await Promise.all(Array.from({ length: concurrency }, worker));
+  let completed = 0;
+  const heavyProduction = new Set(["rag_concurrency", "langgraph_trace"]);
+  const lightProduction = productionCatalog.filter(item => !heavyProduction.has(item.id));
+  const heavyProductionItems = productionCatalog.filter(item => heavyProduction.has(item.id));
+  await Promise.all(lightProduction.map(async item => {
+    await executeProductionModule(item.id);
+    completed++;
+    setProgress(completed, productionCatalog.length, "PRODUCTION");
+  }));
+  for (const item of heavyProductionItems) {
+    log(`HEAVY QUEUE: starting ${item.title} after previous heavy test completed.`);
+    await executeProductionModule(item.id);
+    completed++;
+    setProgress(completed, productionCatalog.length, "PRODUCTION");
+  }
   const values = productionCatalog.map(item => results.get("production:" + item.id)).filter(Boolean);
   const passed = values.filter(value => value.status === "passed").length;
   log("------------------------------------------------------------");
@@ -303,7 +324,10 @@ async function initProduction() {
   try {
     const response = await fetch("/evaluation/production/catalog", { credentials: "same-origin", cache: "no-store" });
     if (!response.ok) throw new Error(`Production catalog HTTP ${response.status}`);
-    const data = await response.json();
+    const rawBody = await response.text();
+    let data;
+    try { data = rawBody ? JSON.parse(rawBody) : {}; }
+    catch { throw new Error(`HTTP ${response.status}: non-JSON response: ${rawBody.slice(0, 240) || "(empty body)"}`); }
     productionCatalog = data.tests || [];
     renderProductionCards();
     log(`${productionCatalog.length} production modules loaded. External k6 tests are configured below.`);
